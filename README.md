@@ -1,5 +1,8 @@
-# 📈 智能股票量化监控系统 (Smart Stock Quant Monitor)
+# 📈 智能股票量化监控WEB系统 (Smart Stock Quant Monitor)
 一个基于 **Vue3 + Node.js + TypeScript** 的轻量级股票监控与推送系统。
+
+由node工具迁入，功能更完善，新增WEB管理界面：
+- node版本：https://github.com/BarnettNeo/stock-monitor
 
 项目由两部分组成：
 
