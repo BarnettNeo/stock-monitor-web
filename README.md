@@ -127,7 +127,31 @@ yarn dev
 - **订阅管理**：维护钉钉/企微等推送渠道
 - **触发日志**：查看触发原因、快照、发送结果与错误
 
-## 🔌 主要 API（简表）
+## 🖼️ 管理后台截图
+
+建议把截图放在：`asstes/images/`（与仓库中现有图片保持一致）。
+
+推荐命名：
+
+- `admin-strategies.png`：策略管理
+- `admin-subscriptions.png`：订阅管理
+- `admin-trigger-logs.png`：触发日志
+
+截图示例（将图片按上述命名放入目录后即可在 README 中展示）：
+
+### 策略管理
+
+![策略管理](./asstes/images/admin-strategies.png)
+
+### 订阅管理
+
+![订阅管理](./asstes/images/admin-subscriptions.png)
+
+### 触发日志
+
+![触发日志](./asstes/images/admin-trigger-logs.png)
+
+## � 主要 API（简表）
 
 - `GET /api/strategies`
 - `GET /api/strategies/:id`
