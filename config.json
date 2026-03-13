@@ -1,0 +1,21 @@
+{
+  "dingtalk": {
+    "webhook": "https://oapi.dingtalk.com/robot/send?access_token=8b7ce7dd4d74211dddd9708a420415f13f604b671891eb217e965e1a571c1e2e",
+    "keyword": "股票"
+  },
+  "watchList": [
+    "sh600519",
+    "sh601318",
+    "sh600036",
+    "sh600759",
+    "sh600916"
+  ],
+  "strategy": {
+    "priceAlertPercent": 2.0,
+    "enableMacdGoldenCross": true,
+    "enableRsiOversold": true,
+    "enableRsiOverbought": true,
+    "alertCooldownMinutes": 60
+  },
+  "checkIntervalMs": 60000
+}
