@@ -12,24 +12,62 @@
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="symbols" label="股票代码" min-width="150" />
         <el-table-column prop="stockNames" label="股票名称" min-width="200" />
-        <el-table-column prop="alertMode" label="告警方式" min-width="200">
+        <el-table-column prop="alertMode" label="告警方式" min-width="260">
           <template #default="scope">
-            {{ scope.row.alertMode === 'percent' ? '大幅异动监控' : '目标价触发' }}
+            <template v-if="scope.row.alertMode === 'target'">
+              目标价触发
+              <span style="color: #666">
+                （涨至：{{ scope.row.targetPriceUp ? `${scope.row.targetPriceUp}` : '-' }} / 跌至：{{ scope.row.targetPriceDown ? `${scope.row.targetPriceDown}` : '-' }})
+              </span>
+            </template>
+            <template v-else>
+              大幅异动监控
+              <span style="color: #666">（阈值：{{ scope.row.priceAlertPercent ?? '-' }}%）</span>
+            </template>
           </template>
         </el-table-column>
         <el-table-column prop="intervalMs" label="推送时间间隔(分)" width="150">
           <template #default="scope">
-            {{ scope.row.intervalMs / 60000 }}
+            {{ typeof scope.row.intervalMs === 'number' ? scope.row.intervalMs / 60000 : '-' }}
           </template>
         </el-table-column>
-        <el-table-column prop="enabled" label="启用" width="80">
+        <el-table-column label="技术指标触发列表" min-width="220">
           <template #default="scope">
-            <el-tag :type="scope.row.enabled ? 'success' : 'info'">
-              {{ scope.row.enabled ? '是' : '否' }}
-            </el-tag>
+            <template v-if="scope.row.enableMacdGoldenCross">
+              <el-tag size="small" style="margin-right: 4px">MACD</el-tag>
+            </template>
+            <template v-if="scope.row.enableRsiOversold">
+              <el-tag size="small" style="margin-right: 4px">RSI超卖</el-tag>
+            </template>
+            <template v-if="scope.row.enableRsiOverbought">
+              <el-tag size="small" style="margin-right: 4px">RSI超买</el-tag>
+            </template>
+            <template v-if="scope.row.enableMovingAverages">
+              <el-tag size="small" style="margin-right: 4px">均线</el-tag>
+            </template>
+            <template v-if="scope.row.enablePatternSignal">
+              <el-tag size="small" style="margin-right: 4px">形态</el-tag>
+            </template>
+            <span
+              v-if="
+                !scope.row.enableMacdGoldenCross &&
+                !scope.row.enableRsiOversold &&
+                !scope.row.enableRsiOverbought &&
+                !scope.row.enableMovingAverages &&
+                !scope.row.enablePatternSignal
+              "
+              style="color: #999"
+            >
+              -
+            </span>
           </template>
         </el-table-column>
-        <el-table-column label="推送方式" width="150">
+        <el-table-column prop="cooldownMinutes" label="冷却时间(分)" width="120">
+          <template #default="scope">
+            {{ typeof scope.row.cooldownMinutes === 'number' ? scope.row.cooldownMinutes : '-' }}
+          </template>
+        </el-table-column>
+        <el-table-column label="推送方式" width="80">
           <template #default="scope">
             <template v-for="subId in (scope.row.subscriptionIds || [])" :key="subId">
               <el-tag
@@ -46,7 +84,19 @@
             <span v-if="!scope.row.subscriptionIds?.length" style="color: #999">-</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180">
+        <el-table-column prop="enabled" label="启用" width="80">
+          <template #default="scope">
+            <el-tag :type="scope.row.enabled ? 'success' : 'info'">
+              {{ scope.row.enabled ? '是' : '否' }}
+            </el-tag>
+          </template>
+        </el-table-column>
+        <el-table-column prop="marketTimeOnly" label="交易时间" width="110">
+          <template #default="scope">
+            <span style="color: #666">{{ scope.row.marketTimeOnly === false ? '不限' : '仅交易时段' }}</span>
+          </template>
+        </el-table-column>
+        <el-table-column label="操作" width="120">
           <template #default="scope">
             <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-button link type="danger" @click="remove(scope.row.id)">删除</el-button>
@@ -61,9 +111,18 @@
           <el-input v-model="form.name" />
         </el-form-item>
 
-        <el-form-item label="启用">
-          <el-switch v-model="form.enabled" />
-        </el-form-item>
+        <el-row :gutter="24">
+          <el-col :span="12">
+            <el-form-item label="启用">
+              <el-switch v-model="form.enabled" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
+            <el-form-item label="仅交易时间推送">
+              <el-switch v-model="form.marketTimeOnly" />
+            </el-form-item>
+          </el-col>
+        </el-row>
 
         <el-form-item label="告警方式">
           <el-radio-group v-model="form.alertMode">
@@ -121,11 +180,6 @@
               <el-input-number v-model="form.intervalMs" :min="1" :step="1" style="width: 100%" />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
-            <el-form-item label="冷却时间(分钟)" prop="cooldownMinutes">
-              <el-input-number v-model="form.cooldownMinutes" :min="1" :step="1" style="width: 100%" />
-            </el-form-item>
-          </el-col>
         </el-row>
 
         <el-divider content-position="left">技术面深度分析指标：</el-divider>
@@ -157,6 +211,14 @@
             </el-form-item>
           </el-col>
         </el-row>
+
+        <el-row :gutter="24">
+          <el-col :span="12">
+            <el-form-item label="冷却时间(分)" prop="cooldownMinutes">
+              <el-input-number v-model="form.cooldownMinutes" :min="1" :step="1" style="width: 100%" />
+            </el-form-item>
+          </el-col>
+        </el-row>
       </el-form>
 
       <template #footer>
@@ -184,10 +246,18 @@ type StrategyDto = {
   symbols: string;
   stockNames: string;
   subscriptionIds?: string[];
+  marketTimeOnly?: boolean;
   alertMode?: 'percent' | 'target';
   targetPriceUp?: number;
   targetPriceDown?: number;
-  intervalMs: number;
+  priceAlertPercent?: number;
+  intervalMs?: number;
+  cooldownMinutes?: number;
+  enableMacdGoldenCross?: boolean;
+  enableRsiOversold?: boolean;
+  enableRsiOverbought?: boolean;
+  enableMovingAverages?: boolean;
+  enablePatternSignal?: boolean;
 };
 
 type SubscriptionDto = {
@@ -250,6 +320,7 @@ const rules = {
 const form = ref({
   name: '',
   enabled: true,
+  marketTimeOnly: true,
   symbols: '',
   subscriptionIds: [] as string[],
   alertMode: 'percent' as 'percent' | 'target',
@@ -273,6 +344,7 @@ function openCreate() {
   form.value = {
     name: '新策略',
     enabled: true,
+    marketTimeOnly: true,
     symbols: '',
     subscriptionIds: [],
     alertMode: 'percent',
@@ -299,6 +371,7 @@ function openEdit(row: any) {
   api.get(`/strategies/${row.id}`).then(res => {
     form.value = res.data.item;
     form.value.intervalMs = res.data.item.intervalMs ? res.data.item.intervalMs / 60000 : 1;
+    (form.value as any).marketTimeOnly = res.data.item.marketTimeOnly !== false;
     (form.value as any).alertMode = (res.data.item.alertMode || 'percent') as any;
     (form.value as any).targetPriceUp = (res.data.item.targetPriceUp ?? undefined) as any;
     (form.value as any).targetPriceDown = (res.data.item.targetPriceDown ?? undefined) as any;
@@ -320,6 +393,7 @@ async function save() {
     const dataToSave = {
       ...form.value,
       alertMode,
+      marketTimeOnly: (form.value as any).marketTimeOnly !== false,
       // 二选一：
       // - target 模式：只发目标价；不再使用涨跌幅阈值
       // - percent 模式：只发涨跌幅阈值；忽略目标价

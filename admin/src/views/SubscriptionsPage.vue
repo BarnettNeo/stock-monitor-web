@@ -19,7 +19,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="180">
+        <el-table-column label="操作" width="120">
           <template #default="scope">
             <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-button link type="danger" @click="remove(scope.row.id)">删除</el-button>

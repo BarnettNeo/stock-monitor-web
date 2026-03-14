@@ -76,6 +76,7 @@ function migrate(database: Database): void {
       name TEXT NOT NULL,
       enabled INTEGER NOT NULL,
       symbols TEXT NOT NULL,
+      market_time_only INTEGER NOT NULL DEFAULT 1,
       -- 报警模式（策略级别二选一）：
       -- - percent: 大幅异动监控（使用 price_alert_percent）
       -- - target: 目标价触发（使用 target_price_up/down，忽略 price_alert_percent）
@@ -143,6 +144,9 @@ function migrate(database: Database): void {
   if (!strategyCols.has('alert_mode')) {
     database.run('ALTER TABLE strategies ADD COLUMN alert_mode TEXT;');
   }
+  if (!strategyCols.has('market_time_only')) {
+    database.run('ALTER TABLE strategies ADD COLUMN market_time_only INTEGER;');
+  }
   if (!strategyCols.has('target_price_up')) {
     database.run('ALTER TABLE strategies ADD COLUMN target_price_up REAL;');
   }
@@ -152,7 +156,12 @@ function migrate(database: Database): void {
 
   // 为存量数据回填默认告警模式，避免前端展示空值
   if (strategyCols.has('alert_mode')) {
-    database.run("UPDATE strategies SET alert_mode = 'percent' WHERE alert_mode IS NULL OR alert_mode = '';");
+    database.run("UPDATE strategies SET alert_mode = 'percent' WHERE alert_mode IS NULL OR alert_mode = ''; ");
+  }
+
+  // 为存量数据回填默认仅交易时间推送（默认开启）
+  if (strategyCols.has('market_time_only')) {
+    database.run('UPDATE strategies SET market_time_only = 1 WHERE market_time_only IS NULL;');
   }
 
   const logCols = getTableColumns(database, 'trigger_logs');

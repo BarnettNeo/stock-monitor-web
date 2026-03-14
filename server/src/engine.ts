@@ -9,6 +9,7 @@ export type Strategy = {
   name: string;
   enabled: boolean;
   symbols: string[];
+  marketTimeOnly?: boolean;
   /**
    * 报警模式（二选一）：
    * - percent：大幅异动监控（使用 priceAlertPercent）
@@ -83,6 +84,27 @@ export type TriggerEvent = {
   };
 };
 
+const lastAlertSentAt = new Map<string, number>();
+const lastIndicatorSentAt = new Map<string, number>();
+
+function isMarketOpen(): boolean {
+  const now = new Date();
+  const day = now.getDay();
+
+  if (day === 0 || day === 6) {
+    return false;
+  }
+
+  const hour = now.getHours();
+  const minute = now.getMinutes();
+  const totalMinutes = hour * 60 + minute;
+
+  const inMorning = totalMinutes >= 9 * 60 + 30 && totalMinutes <= 11 * 60 + 30;
+  const inAfternoon = totalMinutes >= 13 * 60 && totalMinutes <= 15 * 60;
+
+  return inMorning || inAfternoon;
+}
+
 // 批量获取股票数据
 export async function fetchStockDataBatch(codes: string[]): Promise<StockData[]> {
   const baseURL = 'https://hq.sinajs.cn/rn=' + Date.now();
@@ -151,6 +173,7 @@ async function fetchHistoryCloses(code: string, period: string = '1'): Promise<n
   return closes.filter((c: number) => !isNaN(c));
 }
 
+// 获取最近价格数据的内部实现函数
 async function fetchRecentPriceData(code: string, period: string = '1'): Promise<PriceData[]> {
   const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${code}&scale=${period}&datalen=240`;
   const response = await axios.get(url, {
@@ -255,54 +278,78 @@ export async function runStrategyOnce(strategy: Strategy): Promise<TriggerEvent[
   const events: TriggerEvent[] = [];
   if (!strategy.enabled) return events;
 
+  if (strategy.marketTimeOnly !== false && !isMarketOpen()) return events;
+
   const stocks = await fetchStockDataBatch(strategy.symbols);
 
   for (const stock of stocks) {
     const alertMode = strategy.alertMode || 'percent';
+    const nowMs = Date.now();
+
+    const alertIntervalMs = Math.max(0, Number(strategy.intervalMs || 0));
+    const indicatorCooldownMs = Math.max(0, Number(strategy.cooldownMinutes || 0)) * 60 * 1000;
+
+    const alertKey = `${strategy.id}:${stock.code}:ALERT`;
+
+    // 目标价格模式
     if (alertMode === 'target') {
       if (
         typeof strategy.targetPriceUp === 'number' &&
         strategy.targetPriceUp > 0 &&
         stock.currentPrice >= strategy.targetPriceUp
       ) {
-        events.push({
-          symbol: stock.code,
-          stockName: stock.name,
-          reason: `涨幅至目标价: ${strategy.targetPriceUp}`,
-          snapshot: {
-            stock,
-            threshold: { targetPriceUp: strategy.targetPriceUp },
-          },
-        });
+        const last = lastAlertSentAt.get(alertKey) || 0;
+        if (alertIntervalMs <= 0 || nowMs - last >= alertIntervalMs) {
+          lastAlertSentAt.set(alertKey, nowMs);
+          events.push({
+            symbol: stock.code,
+            stockName: stock.name,
+            reason: `涨幅至目标价: ${strategy.targetPriceUp}`,
+            snapshot: {
+              stock,
+              threshold: { targetPriceUp: strategy.targetPriceUp },
+            },
+          });
+        }
       } else if (
         typeof strategy.targetPriceDown === 'number' &&
         strategy.targetPriceDown > 0 &&
         stock.currentPrice <= strategy.targetPriceDown
       ) {
-        events.push({
-          symbol: stock.code,
-          stockName: stock.name,
-          reason: `跌幅至目标价: ${strategy.targetPriceDown}`,
-          snapshot: {
-            stock,
-            threshold: { targetPriceDown: strategy.targetPriceDown },
-          },
-        });
+        const last = lastAlertSentAt.get(alertKey) || 0;
+        if (alertIntervalMs <= 0 || nowMs - last >= alertIntervalMs) {
+          lastAlertSentAt.set(alertKey, nowMs);
+          events.push({
+            symbol: stock.code,
+            stockName: stock.name,
+            reason: `跌幅至目标价: ${strategy.targetPriceDown}`,
+            snapshot: {
+              stock,
+              threshold: { targetPriceDown: strategy.targetPriceDown },
+            },
+          });
+        }
       }
     } else {
+      // 百分比模式
       if (Math.abs(stock.changePercent) >= strategy.priceAlertPercent) {
-        events.push({
-          symbol: stock.code,
-          stockName: stock.name,
-          reason: `价格异动 (${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent}%)`,
-          snapshot: {
-            stock,
-            threshold: { priceAlertPercent: strategy.priceAlertPercent },
-          },
-        });
+        const last = lastAlertSentAt.get(alertKey) || 0;
+        if (alertIntervalMs <= 0 || nowMs - last >= alertIntervalMs) {
+          lastAlertSentAt.set(alertKey, nowMs);
+          events.push({
+            symbol: stock.code,
+            stockName: stock.name,
+            reason: `价格异动 (${stock.changePercent >= 0 ? '+' : ''}${stock.changePercent}%)`,
+            snapshot: {
+              stock,
+              threshold: { priceAlertPercent: strategy.priceAlertPercent },
+            },
+          });
+        }
       }
     }
 
+    // 技术面深度分析
     const needIndicator =
       strategy.enableMacdGoldenCross ||
       strategy.enableRsiOversold ||
@@ -314,42 +361,63 @@ export async function runStrategyOnce(strategy: Strategy): Promise<TriggerEvent[
       if (!indicator) continue;
 
       if (strategy.enableMacdGoldenCross && indicator.macd?.trend === 'BULLISH') {
-        events.push({
-          symbol: stock.code,
-          stockName: stock.name,
-          reason: 'MACD 金叉 (买入信号)',
-          snapshot: { stock, indicator },
-        });
+        const key = `${strategy.id}:${stock.code}:MACD 金叉 (买入信号)`;
+        const last = lastIndicatorSentAt.get(key) || 0;
+        if (indicatorCooldownMs <= 0 || nowMs - last >= indicatorCooldownMs) {
+          lastIndicatorSentAt.set(key, nowMs);
+          events.push({
+            symbol: stock.code,
+            stockName: stock.name,
+            reason: 'MACD 金叉 (买入信号)',
+            snapshot: { stock, indicator },
+          });
+        }
       }
 
       if (strategy.enableRsiOversold && indicator.rsi?.status === 'OVERSOLD') {
-        events.push({
-          symbol: stock.code,
-          stockName: stock.name,
-          reason: 'RSI 超卖 (潜在反弹)',
-          snapshot: { stock, indicator },
-        });
+        const key = `${strategy.id}:${stock.code}:RSI 超卖 (潜在反弹)`;
+        const last = lastIndicatorSentAt.get(key) || 0;
+        if (indicatorCooldownMs <= 0 || nowMs - last >= indicatorCooldownMs) {
+          lastIndicatorSentAt.set(key, nowMs);
+          events.push({
+            symbol: stock.code,
+            stockName: stock.name,
+            reason: 'RSI 超卖 (潜在反弹)',
+            snapshot: { stock, indicator },
+          });
+        }
       }
 
       if (strategy.enableRsiOverbought && indicator.rsi?.status === 'OVERBOUGHT') {
-        events.push({
-          symbol: stock.code,
-          stockName: stock.name,
-          reason: 'RSI 超买 (回调风险)',
-          snapshot: { stock, indicator },
-        });
+        const key = `${strategy.id}:${stock.code}:RSI 超买 (回调风险)`;
+        const last = lastIndicatorSentAt.get(key) || 0;
+        if (indicatorCooldownMs <= 0 || nowMs - last >= indicatorCooldownMs) {
+          lastIndicatorSentAt.set(key, nowMs);
+          events.push({
+            symbol: stock.code,
+            stockName: stock.name,
+            reason: 'RSI 超买 (回调风险)',
+            snapshot: { stock, indicator },
+          });
+        }
       }
 
       if (strategy.enableMovingAverages && indicator.movingAverages?.trend === 'ABOVE_ALL') {
-        events.push({
-          symbol: stock.code,
-          stockName: stock.name,
-          reason: '均线多头排列 (趋势偏多)',
-          snapshot: { stock, indicator },
-        });
+        const key = `${strategy.id}:${stock.code}:均线多头排列 (趋势偏多)`;
+        const last = lastIndicatorSentAt.get(key) || 0;
+        if (indicatorCooldownMs <= 0 || nowMs - last >= indicatorCooldownMs) {
+          lastIndicatorSentAt.set(key, nowMs);
+          events.push({
+            symbol: stock.code,
+            stockName: stock.name,
+            reason: '均线多头排列 (趋势偏多)',
+            snapshot: { stock, indicator },
+          });
+        }
       }
     }
 
+    // 模式信号
     if (strategy.enablePatternSignal) {
       let pattern: PatternSignal | null = null;
       try {
@@ -362,12 +430,18 @@ export async function runStrategyOnce(strategy: Strategy): Promise<TriggerEvent[
       }
 
       if (pattern) {
-        events.push({
-          symbol: stock.code,
-          stockName: stock.name,
-          reason: `${pattern.type} (${pattern.signal})`,
-          snapshot: { stock, threshold: { pattern } },
-        });
+        const reason = `${pattern.type} (${pattern.signal})`;
+        const key = `${strategy.id}:${stock.code}:${reason}`;
+        const last = lastIndicatorSentAt.get(key) || 0;
+        if (indicatorCooldownMs <= 0 || nowMs - last >= indicatorCooldownMs) {
+          lastIndicatorSentAt.set(key, nowMs);
+          events.push({
+            symbol: stock.code,
+            stockName: stock.name,
+            reason,
+            snapshot: { stock, threshold: { pattern } },
+          });
+        }
       }
     }
   }

@@ -82,6 +82,7 @@ const StrategyInputSchema = z.object({
   name: z.string().min(1),
   enabled: z.boolean().default(true),
   symbols: z.string().min(1),
+  marketTimeOnly: z.boolean().optional().default(true),
   subscriptionIds: z.array(z.string()).optional(),
   alertMode: z.enum(['percent', 'target']).optional().default('percent'),
   targetPriceUp: z.number().positive().optional(),
@@ -97,7 +98,7 @@ const StrategyInputSchema = z.object({
 });
 
 const SubscriptionInputSchema = z.object({
-  userId: z.string().optional(),
+  userId: z.string().nullable().optional(),
   name: z.string().min(1),
   type: z.enum(['dingtalk', 'wecom_robot', 'wecom_app']),
   enabled: z.boolean().default(true),
@@ -126,6 +127,7 @@ function rowToStrategy(row: any): any {
     name: row.name,
     enabled: intToBool(row.enabled),
     symbols: row.symbols,
+    marketTimeOnly: row.market_time_only === undefined || row.market_time_only === null ? true : intToBool(row.market_time_only),
     subscriptionIds,
     alertMode: (row.alert_mode === 'target' ? 'target' : 'percent'),
     targetPriceUp: typeof row.target_price_up === 'number' ? row.target_price_up : (row.target_price_up ? Number(row.target_price_up) : undefined),
@@ -256,16 +258,17 @@ app.post('/api/strategies', async (req: Request, res: Response) => {
 
     db.run(
       `INSERT INTO strategies (
-        id,user_id,name,enabled,symbols,subscription_ids_json,alert_mode,target_price_up,target_price_down,interval_ms,cooldown_minutes,price_alert_percent,
+        id,user_id,name,enabled,symbols,market_time_only,subscription_ids_json,alert_mode,target_price_up,target_price_down,interval_ms,cooldown_minutes,price_alert_percent,
         enable_macd_golden_cross,enable_rsi_oversold,enable_rsi_overbought,enable_moving_averages,enable_pattern_signal,
         created_at,updated_at
-      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+      ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
       [
         id,
         parsed.userId || null,
         parsed.name,
         boolToInt(parsed.enabled),
         parsed.symbols,
+        boolToInt(parsed.marketTimeOnly !== false),
         subscriptionIdsJson,
         parsed.alertMode || 'percent',
         parsed.targetPriceUp ?? null,
@@ -302,7 +305,7 @@ app.put('/api/strategies/:id', async (req: Request, res: Response) => {
 
     db.run(
       `UPDATE strategies SET
-        user_id=?,name=?,enabled=?,symbols=?,alert_mode=?,target_price_up=?,target_price_down=?,interval_ms=?,cooldown_minutes=?,price_alert_percent=?,
+        user_id=?,name=?,enabled=?,symbols=?,market_time_only=?,alert_mode=?,target_price_up=?,target_price_down=?,interval_ms=?,cooldown_minutes=?,price_alert_percent=?,
         enable_macd_golden_cross=?,enable_rsi_oversold=?,enable_rsi_overbought=?,enable_moving_averages=?,enable_pattern_signal=?,
         subscription_ids_json=?,updated_at=?
       WHERE id=?`,
@@ -311,6 +314,7 @@ app.put('/api/strategies/:id', async (req: Request, res: Response) => {
         parsed.name,
         boolToInt(parsed.enabled),
         parsed.symbols,
+        boolToInt(parsed.marketTimeOnly !== false),
         parsed.alertMode || 'percent',
         parsed.targetPriceUp ?? null,
         parsed.targetPriceDown ?? null,
@@ -473,8 +477,6 @@ app.get('/api/trigger-logs', async (_req: Request, res: Response) => {
   res.json({ items });
 });
 
-const lastFired = new Map<string, number>();
-
 /**
  * 将触发事件格式化为 markdown，便于机器人/企微应用统一发送。
  * - markdown 内会带上 snapshot（JSON）方便后续排查“为什么触发”。
@@ -518,6 +520,7 @@ async function scanOnce(): Promise<void> {
         enabled: intToBool(row.enabled),
         symbols,
         subscriptionIds,
+        marketTimeOnly: row.market_time_only === undefined || row.market_time_only === null ? true : intToBool(row.market_time_only),
         alertMode: (row.alert_mode === 'target' ? 'target' : 'percent'),
         targetPriceUp: typeof row.target_price_up === 'number' ? row.target_price_up : (row.target_price_up ? Number(row.target_price_up) : undefined),
         targetPriceDown: typeof row.target_price_down === 'number' ? row.target_price_down : (row.target_price_down ? Number(row.target_price_down) : undefined),
@@ -538,14 +541,6 @@ async function scanOnce(): Promise<void> {
     try {
       const events = await runStrategyOnce(strategy);
       for (const ev of events) {
-        // 冷却：避免同一策略对同一股票/原因高频重复推送
-        const key = `${strategy.id}:${ev.symbol}:${ev.reason}`;
-        const now = Date.now();
-        const last = lastFired.get(key) || 0;
-        if (now - last < strategy.cooldownMinutes * 60 * 1000) continue;
-
-        lastFired.set(key, now);
-
         // 如果策略未绑定订阅：只落库一条 NO_SUBSCRIPTION 记录
         // 如果已绑定订阅：对每个订阅分别发送、分别落库（便于看每个渠道的结果）
         const subIds = (strategy as any).subscriptionIds as string[] | undefined;
