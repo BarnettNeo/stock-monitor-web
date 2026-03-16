@@ -4,7 +4,12 @@
       <template #header>
         <div style="display:flex; justify-content: space-between; align-items:center">
           <div>策略列表</div>
-          <el-button type="primary" @click="openCreate">新增策略</el-button>
+          <div style="display:flex; gap: 8px; align-items:center">
+            <el-input v-model="qName" placeholder="名称" style="width: 180px" clearable />
+            <el-input v-model="qUsername" placeholder="用户名" style="width: 180px" clearable />
+            <el-button @click="fetchList">查询</el-button>
+            <el-button type="primary" @click="openCreate">新增策略</el-button>
+          </div>
         </div>
       </template>
 
@@ -12,7 +17,7 @@
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="symbols" label="股票代码" min-width="150" />
         <el-table-column prop="stockNames" label="股票名称" min-width="200" />
-        <el-table-column prop="alertMode" label="告警方式" min-width="260">
+        <el-table-column prop="alertMode" label="告警方式" min-width="250">
           <template #default="scope">
             <template v-if="scope.row.alertMode === 'target'">
               目标价触发
@@ -31,7 +36,7 @@
             {{ typeof scope.row.intervalMs === 'number' ? scope.row.intervalMs / 60000 : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="技术指标触发列表" min-width="220">
+        <el-table-column label="技术指标触发列表" min-width="210">
           <template #default="scope">
             <template v-if="scope.row.enableMacdGoldenCross">
               <el-tag size="small" style="margin-right: 4px">MACD</el-tag>
@@ -62,7 +67,7 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="cooldownMinutes" label="冷却时间(分)" width="120">
+        <el-table-column prop="cooldownMinutes" label="冷却时间(分)" width="110">
           <template #default="scope">
             {{ typeof scope.row.cooldownMinutes === 'number' ? scope.row.cooldownMinutes : '-' }}
           </template>
@@ -91,7 +96,8 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="marketTimeOnly" label="交易时间" width="110">
+        <el-table-column prop="createdByUsername" label="创建人" width="100" />
+        <el-table-column prop="marketTimeOnly" label="交易时间" width="80">
           <template #default="scope">
             <span style="color: #666">{{ scope.row.marketTimeOnly === false ? '不限' : '仅交易时段' }}</span>
           </template>
@@ -242,6 +248,7 @@ import { useListFetcher } from '../composables/useListFetcher';
 type StrategyDto = {
   id: string;
   name: string;
+  createdByUsername?: string | null;
   enabled: boolean;
   symbols: string;
   stockNames: string;
@@ -266,8 +273,16 @@ type SubscriptionDto = {
   type: 'dingtalk' | 'wecom_robot' | 'wecom_app';
 };
 
+const qName = ref('');
+const qUsername = ref('');
+
 const { loading, items, fetchList } = useListFetcher<StrategyDto>(async () => {
-  const res = await api.get('/strategies');
+  const res = await api.get('/strategies', {
+    params: {
+      name: qName.value || undefined,
+      username: qUsername.value || undefined,
+    },
+  });
   return res.data.items;
 });
 

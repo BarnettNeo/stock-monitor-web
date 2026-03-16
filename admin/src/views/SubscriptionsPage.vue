@@ -4,13 +4,19 @@
       <template #header>
         <div style="display:flex; justify-content: space-between; align-items:center">
           <div>订阅管理</div>
-          <el-button type="primary" @click="openCreate">新增订阅</el-button>
+          <div style="display:flex; gap: 8px; align-items:center">
+            <el-input v-model="qName" placeholder="名称" style="width: 180px" clearable />
+            <el-input v-model="qUsername" placeholder="用户名" style="width: 180px" clearable />
+            <el-button @click="fetchList">查询</el-button>
+            <el-button type="primary" @click="openCreate">新增订阅</el-button>
+          </div>
         </div>
       </template>
 
       <el-table :data="items" style="width: 100%" v-loading="loading">
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="webhookUrl" label="Webhook" />
+        <el-table-column prop="createdByUsername" label="创建人" width="120" />
         <el-table-column prop="type" label="类型" width="120" />
         <el-table-column prop="enabled" label="启用" width="80">
           <template #default="scope">
@@ -71,14 +77,23 @@ import { useListFetcher } from '../composables/useListFetcher';
 type SubscriptionDto = {
   id: string;
   name: string;
+  createdByUsername?: string | null;
   type: 'dingtalk' | 'wecom_robot';
   enabled: boolean;
   webhookUrl?: string;
   keyword?: string;
 };
 
+const qName = ref('');
+const qUsername = ref('');
+
 const { loading, items, fetchList } = useListFetcher<SubscriptionDto>(async () => {
-  const res = await api.get('/subscriptions');
+  const res = await api.get('/subscriptions', {
+    params: {
+      name: qName.value || undefined,
+      username: qUsername.value || undefined,
+    },
+  });
   return res.data.items;
 });
 

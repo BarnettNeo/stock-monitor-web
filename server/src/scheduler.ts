@@ -1,0 +1,112 @@
+import crypto from 'node:crypto';
+
+import { getDb, persist } from './db';
+import { runStrategyOnce, type Strategy } from './engine';
+import { notifyBySubscription, type Subscription as NotifySubscription } from './notify';
+import { buildNotifyPayload } from './message-templates';
+import { intToBool, nowIso } from './utils';
+import { rowToSubscription } from './mappers';
+
+type StrategyRow = any;
+
+function buildMarkdownFromEvent(ev: any): { title: string; markdown: string } {
+  return buildNotifyPayload(ev, 'dingtalk');
+}
+
+// 扫描一次：读取启用策略 -> 计算触发事件 -> 对订阅发送并落库 trigger_logs
+export async function scanOnce(): Promise<void> {
+  const db = await getDb();
+
+  const subsResult = db.exec('SELECT * FROM subscriptions WHERE enabled = 1');
+  const subRows = subsResult[0]?.values || [];
+  const subCols = subsResult[0]?.columns || [];
+  const allSubs = subRows
+    .map((v: any[]) => Object.fromEntries(v.map((x: any, i: number) => [subCols[i], x])))
+    .map(rowToSubscription) as NotifySubscription[];
+  const subMap = new Map(allSubs.map((s) => [s.id, s]));
+
+  const strategyResult = db.exec('SELECT * FROM strategies WHERE enabled = 1');
+  const sRows = strategyResult[0]?.values || [];
+  const sCols = strategyResult[0]?.columns || [];
+  const strategies = sRows
+    .map((v: any[]) => Object.fromEntries(v.map((x: any, i: number) => [sCols[i], x])))
+    .map((row: StrategyRow) => {
+      const symbols = String(row.symbols)
+        .split(',')
+        .map((s: string) => s.trim())
+        .filter(Boolean);
+
+      const subscriptionIds: string[] = row.subscription_ids_json ? JSON.parse(String(row.subscription_ids_json)) : [];
+
+      const strategy: Strategy = {
+        id: row.id,
+        userId: row.user_id,
+        name: row.name,
+        enabled: intToBool(row.enabled),
+        symbols,
+        subscriptionIds,
+        marketTimeOnly: row.market_time_only === undefined || row.market_time_only === null ? true : intToBool(row.market_time_only),
+        alertMode: row.alert_mode === 'target' ? 'target' : 'percent',
+        targetPriceUp: typeof row.target_price_up === 'number' ? row.target_price_up : row.target_price_up ? Number(row.target_price_up) : undefined,
+        targetPriceDown: typeof row.target_price_down === 'number' ? row.target_price_down : row.target_price_down ? Number(row.target_price_down) : undefined,
+        intervalMs: Number(row.interval_ms),
+        cooldownMinutes: Number(row.cooldown_minutes),
+        priceAlertPercent: Number(row.price_alert_percent),
+        enableMacdGoldenCross: intToBool(row.enable_macd_golden_cross),
+        enableRsiOversold: intToBool(row.enable_rsi_oversold),
+        enableRsiOverbought: intToBool(row.enable_rsi_overbought),
+        enableMovingAverages: intToBool(row.enable_moving_averages),
+        enablePatternSignal: intToBool(row.enable_pattern_signal),
+      };
+
+      return strategy;
+    });
+
+  for (const strategy of strategies) {
+    try {
+      const events = await runStrategyOnce(strategy);
+      for (const ev of events) {
+        const subIds = (strategy as any).subscriptionIds as string[] | undefined;
+        const targets = subIds && subIds.length > 0 ? subIds.map((id) => subMap.get(id)).filter(Boolean) : [undefined];
+
+        for (const sub of targets) {
+          const payload = sub ? buildNotifyPayload(ev, sub.type) : buildMarkdownFromEvent(ev);
+          const sendResult = sub ? await notifyBySubscription(sub, payload) : { ok: true };
+
+          const id = crypto.randomUUID();
+          db.run(
+            `INSERT INTO trigger_logs (
+              id,user_id,strategy_id,subscription_id,symbol,stock_name,reason,snapshot_json,send_status,send_error,created_at
+            ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
+            [
+              id,
+              strategy.userId || null,
+              strategy.id,
+              sub ? sub.id : null,
+              ev.symbol,
+              ev.stockName || null,
+              ev.reason,
+              JSON.stringify(ev.snapshot),
+              sub ? (sendResult.ok ? 'SENT' : 'FAILED') : 'NO_SUBSCRIPTION',
+              sendResult.ok ? null : sendResult.error || 'unknown error',
+              nowIso(),
+            ],
+          );
+        }
+      }
+    } catch (e) {
+      console.error('scanOnce strategy error:', strategy.id, e);
+    }
+  }
+
+  persist();
+}
+
+export async function startScheduler(): Promise<void> {
+  console.log('扫码策略时间间隔:', process.env.SCAN_INTERVAL_MS);
+  const intervalMs = Number(process.env.SCAN_INTERVAL_MS || 15000);
+  await scanOnce();
+  setInterval(() => {
+    scanOnce().catch((err) => console.error('scanOnce error:', err));
+  }, intervalMs);
+}

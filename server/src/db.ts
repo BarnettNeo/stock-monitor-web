@@ -70,6 +70,18 @@ function getTableColumns(database: Database, table: string): Set<string> {
 function migrate(database: Database): void {
   // 基础表结构（全新数据库会走这里创建完整表）
   database.run(`
+    CREATE TABLE IF NOT EXISTS users (
+      id TEXT PRIMARY KEY,
+      username TEXT NOT NULL UNIQUE,
+      password_salt TEXT NOT NULL,
+      password_hash TEXT NOT NULL,
+      role TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+  `);
+
+  database.run(`
     CREATE TABLE IF NOT EXISTS strategies (
       id TEXT PRIMARY KEY,
       user_id TEXT,
@@ -170,5 +182,24 @@ function migrate(database: Database): void {
   }
   if (!logCols.has('send_error')) {
     database.run('ALTER TABLE trigger_logs ADD COLUMN send_error TEXT;');
+  }
+
+  const userCols = getTableColumns(database, 'users');
+  if (userCols.size > 0) {
+    if (!userCols.has('role')) {
+      database.run('ALTER TABLE users ADD COLUMN role TEXT;');
+    }
+    if (!userCols.has('password_salt')) {
+      database.run('ALTER TABLE users ADD COLUMN password_salt TEXT;');
+    }
+    if (!userCols.has('password_hash')) {
+      database.run('ALTER TABLE users ADD COLUMN password_hash TEXT;');
+    }
+    if (!userCols.has('created_at')) {
+      database.run('ALTER TABLE users ADD COLUMN created_at TEXT;');
+    }
+    if (!userCols.has('updated_at')) {
+      database.run('ALTER TABLE users ADD COLUMN updated_at TEXT;');
+    }
   }
 }
