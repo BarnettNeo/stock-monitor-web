@@ -155,7 +155,7 @@ export function registerStrategyRoutes(app: Express): void {
           id,user_id,name,enabled,symbols,market_time_only,subscription_ids_json,alert_mode,target_price_up,target_price_down,interval_ms,cooldown_minutes,price_alert_percent,
           enable_macd_golden_cross,enable_rsi_oversold,enable_rsi_overbought,enable_moving_averages,enable_pattern_signal,
           created_at,updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           id,
           user.userId,
