@@ -26,7 +26,7 @@
             </template>
           </template>
         </el-table-column>
-        <el-table-column prop="intervalMs" label="推送时间间隔(分)" width="150">
+        <el-table-column prop="intervalMs" label="推送时间间隔(分)" width="140">
           <template #default="scope">
             {{ typeof scope.row.intervalMs === 'number' ? scope.row.intervalMs / 60000 : '-' }}
           </template>
