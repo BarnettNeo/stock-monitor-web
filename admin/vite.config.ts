@@ -4,6 +4,9 @@ import path from 'path';
 
 export default defineConfig({
   plugins: [vue()],
+  css: {
+    postcss: './postcss.config.js',
+  },
   resolve: {
     alias: {
       '@asstes': path.resolve(__dirname, '../asstes'),

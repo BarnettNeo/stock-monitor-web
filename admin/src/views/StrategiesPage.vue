@@ -97,7 +97,7 @@
           </template>
         </el-table-column>
         <el-table-column prop="createdByUsername" label="创建人" width="100" />
-        <el-table-column prop="marketTimeOnly" label="交易时间" width="80">
+        <el-table-column prop="marketTimeOnly" label="交易时间" width="100">
           <template #default="scope">
             <span style="color: #666">{{ scope.row.marketTimeOnly === false ? '不限' : '仅交易时段' }}</span>
           </template>

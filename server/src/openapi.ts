@@ -89,6 +89,31 @@ export const openapiDoc = {
     '/api/trigger-logs': {
       get: {
         summary: 'List trigger logs',
+        parameters: [
+          { name: 'symbol', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'startDate', in: 'query', required: false, schema: { type: 'string', format: 'date' } },
+          { name: 'endDate', in: 'query', required: false, schema: { type: 'string', format: 'date' } },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', minimum: 1 } },
+          {
+            name: 'pageSize',
+            in: 'query',
+            required: false,
+            schema: { type: 'integer', minimum: 1, maximum: 100 },
+          },
+          {
+            name: 'type',
+            in: 'query',
+            required: false,
+            schema: { type: 'string', enum: ['price', 'indicator', 'pattern'] },
+          },
+        ],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/trigger-logs/{id}': {
+      get: {
+        summary: 'Get trigger log detail',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
         responses: { '200': { description: 'OK' } },
       },
     },

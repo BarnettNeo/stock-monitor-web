@@ -4,6 +4,7 @@ export interface PriceData {
   close: number;
   volume?: number;
   time?: string;
+  open?: number;
 }
 
 export interface PatternSignal {

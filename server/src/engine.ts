@@ -174,7 +174,7 @@ async function fetchHistoryCloses(code: string, period: string = '1'): Promise<n
 }
 
 // 获取最近价格数据的内部实现函数
-async function fetchRecentPriceData(code: string, period: string = '1'): Promise<PriceData[]> {
+export async function fetchRecentPriceData(code: string, period: string = '1'): Promise<PriceData[]> {
   const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${code}&scale=${period}&datalen=240`;
   const response = await axios.get(url, {
     timeout: 5000,
@@ -189,14 +189,16 @@ async function fetchRecentPriceData(code: string, period: string = '1'): Promise
 
   const prices: PriceData[] = klines
     .map((k: any) => {
+      const open = parseFloat(k.open);
       const high = parseFloat(k.high);
       const low = parseFloat(k.low);
       const close = parseFloat(k.close);
       const volume = k.volume !== undefined ? Number(k.volume) : Number(k.vol || 0);
 
-      if (isNaN(high) || isNaN(low) || isNaN(close)) return null;
+      if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) return null;
 
       return {
+        open,
         high,
         low,
         close,

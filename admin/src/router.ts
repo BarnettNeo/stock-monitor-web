@@ -7,6 +7,7 @@ import RegisterPage from './views/RegisterPage.vue';
 import StrategiesPage from './views/StrategiesPage.vue';
 import SubscriptionsPage from './views/SubscriptionsPage.vue';
 import TriggerLogsPage from './views/TriggerLogsPage.vue';
+import TriggerLogDetailPage from './views/TriggerLogDetailPage.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -17,6 +18,7 @@ export const router = createRouter({
     { path: '/strategies', component: StrategiesPage },
     { path: '/subscriptions', component: SubscriptionsPage },
     { path: '/trigger-logs', component: TriggerLogsPage },
+    { path: '/trigger-logs/:id', component: TriggerLogDetailPage },
   ],
 });
 
