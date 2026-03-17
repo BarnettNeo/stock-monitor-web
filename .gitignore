@@ -1,2 +1,20 @@
 node_modules/
 dist/
+
+# OpenSpec - 提交核心规范，忽略临时文件
+!openspec/specs/
+!openspec/changes/
+!openspec/AGENTS.md
+!openspec/project.md
+# 但忽略可能的本地缓存
+openspec/.cache/
+openspec/tmp/
+openspec/*.log
+
+# Trae IDE - 提交项目级Skills，忽略个人配置
+! .trae/skills/*.md
+! .trae/skills/**/SKILL.md
+# 但忽略个人特定的配置
+.trae/settings.json
+.trae/user-config/
+.trae/state.json
