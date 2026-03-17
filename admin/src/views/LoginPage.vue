@@ -65,7 +65,7 @@ async function submit() {
     });
     setAuthToken(res.data.token);
     ElMessage.success('登录成功');
-    router.replace('/strategies');
+    router.replace('/screen');
   } catch (error: any) {
     const msg = error?.response?.data?.message || error?.message || '登录失败';
     ElMessage.error(msg);

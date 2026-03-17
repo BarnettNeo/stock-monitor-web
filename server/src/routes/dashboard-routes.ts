@@ -44,9 +44,16 @@ export function registerDashboardRoutes(app: Express): void {
 
     const db = await getDb();
 
+    const isAdmin = user.role === 'admin';
+    const userId = user.userId
+
     const today = getTodayStr();
 
-    const strategyStmt = db.prepare('SELECT id, enabled, symbols FROM strategies');
+    let strategyWhere = isAdmin ? '' : 'WHERE user_id = ?';
+    const strategyParams = isAdmin ? [] : [userId];
+
+    const strategyStmt = db.prepare(`SELECT id, enabled, symbols FROM strategies ${strategyWhere}`);
+    strategyStmt.bind(strategyParams);
     const strategyRows: any[] = [];
     while (strategyStmt.step()) {
       strategyRows.push(strategyStmt.getAsObject());
@@ -58,8 +65,12 @@ export function registerDashboardRoutes(app: Express): void {
 
     const since = typeof req.query.since === 'string' ? String(req.query.since).trim() : '';
 
-    const logWhere = 'WHERE substr(created_at,1,10) = ?';
+    let logWhere = 'WHERE substr(created_at,1,10) = ?';
     const logParams: any[] = [today];
+    if (!isAdmin) {
+      logWhere += ' AND user_id = ?';
+      logParams.push(userId);
+    }
 
     const countStmt = db.prepare(`SELECT COUNT(*) AS cnt FROM trigger_logs ${logWhere}`);
     countStmt.bind(logParams);

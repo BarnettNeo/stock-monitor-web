@@ -9,7 +9,16 @@
       </div>
     </div>
 
-    <div class="grid grid-cols-4 gap-3 mt-3 max-[1280px]:grid-cols-2">
+    <div v-if="currentUser && currentUser.role !== 'admin' && data?.kpis?.monitoredSymbols === 0" class="mt-3">
+      <div class=" border border-slate-400/20 rounded-lg bg-slate-900/60 backdrop-blur">
+        <div class="text-center p-6">
+          <p class="text-lg mb-4">您当前还没有配置任何监控策略。</p>
+          <el-button type="primary" @click="goToStrategies">前往配置</el-button>
+        </div>
+      </div>
+    </div>
+
+    <div v-else class="grid grid-cols-4 gap-3 mt-3 max-[1280px]:grid-cols-2">
       <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-4">
         <div class="text-slate-400 text-xs">运行中策略</div>
         <div class="mt-2 text-2xl font-extrabold tabular-nums">{{ data?.kpis?.runningStrategies ?? '-' }}</div>
@@ -153,6 +162,8 @@ type TriggerDetail = {
 };
 
 const router = useRouter();
+
+const currentUser = ref<{ role: string } | null>(null);
 
 const now = ref(new Date());
 const nowText = computed(() => now.value.toLocaleString('zh-CN'));
@@ -485,7 +496,17 @@ function onVisibility(): void {
   }
 }
 
+async function getUserInfo() {
+  try {
+    const res = await api.get('/auth/me');
+    currentUser.value = res.data?.user || null;
+  } catch {
+    currentUser.value = null;
+  }
+}
+
 onMounted(() => {
+  getUserInfo();
   clockTimer = window.setInterval(() => {
     now.value = new Date();
   }, 1000);
