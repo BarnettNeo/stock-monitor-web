@@ -9,6 +9,7 @@ import swaggerUi from 'swagger-ui-express';
 import { openapiDoc } from './openapi';
 import { startScheduler } from './scheduler';
 import { registerAuthRoutes } from './routes/auth-routes';
+import { registerDashboardRoutes } from './routes/dashboard-routes';
 import { registerStrategyRoutes } from './routes/strategies-routes';
 import { registerSubscriptionRoutes } from './routes/subscriptions-routes';
 import { registerTriggerLogRoutes } from './routes/trigger-logs-routes';
@@ -38,6 +39,7 @@ app.get('/openapi.json', (_req: Request, res: Response) => {
 app.use('/api-docs', (swaggerUi.serve as any), (swaggerUi.setup(openapiDoc as any) as any));
 
 registerAuthRoutes(app);
+registerDashboardRoutes(app);
 registerStrategyRoutes(app);
 registerSubscriptionRoutes(app);
 registerTriggerLogRoutes(app);

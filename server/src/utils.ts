@@ -4,6 +4,20 @@ export function nowIso(): string {
   return new Date().toISOString();
 }
 
+export function formatDate(date: Date | string): string {
+  const d = typeof date === 'string' ? new Date(date) : date;
+  const pad = (n: number) => (n < 10 ? '0' + n : n);
+
+  const year = d.getFullYear();
+  const month = pad(d.getMonth() + 1);
+  const day = pad(d.getDate());
+  const hours = pad(d.getHours());
+  const minutes = pad(d.getMinutes());
+  const seconds = pad(d.getSeconds());
+
+  return `${year}-${month}-${day} ${hours}:${minutes}:${seconds}`;
+}
+
 export function intToBool(v: any): boolean {
   return Number(v) === 1;
 }

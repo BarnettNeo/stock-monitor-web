@@ -8,6 +8,7 @@ import StrategiesPage from './views/StrategiesPage.vue';
 import SubscriptionsPage from './views/SubscriptionsPage.vue';
 import TriggerLogsPage from './views/TriggerLogsPage.vue';
 import TriggerLogDetailPage from './views/TriggerLogDetailPage.vue';
+import ScreenHomePage from './views/ScreenHomePage.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -15,6 +16,7 @@ export const router = createRouter({
     { path: '/', redirect: '/strategies' },
     { path: '/login', component: LoginPage, meta: { public: true } },
     { path: '/register', component: RegisterPage, meta: { public: true } },
+    { path: '/screen', component: ScreenHomePage },
     { path: '/strategies', component: StrategiesPage },
     { path: '/subscriptions', component: SubscriptionsPage },
     { path: '/trigger-logs', component: TriggerLogsPage },

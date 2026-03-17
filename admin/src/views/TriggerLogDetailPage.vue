@@ -14,7 +14,7 @@
               {{ item.stockName }} ({{ item.symbol }}) - {{ item.reason }}
             </h1>
             <div class="text-sm text-gray-500 mt-1">
-              <span>触发时间: {{ formatDate(item.createdAt) }}</span>
+              <span>触发时间: {{ item.createdAt }}</span>
               <span class="ml-4" v-if="item.snapshot?.price">触发价格: ¥{{ item.snapshot.price }}</span>
             </div>
           </div>
@@ -208,19 +208,6 @@ function initCharts(data: any) {
 
 function backToList() {
   router.push('/trigger-logs');
-}
-
-function formatDate(isoString: string): string {
-  if (!isoString) return '';
-  const date = new Date(isoString);
-  return date.toLocaleString('zh-CN', {
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-  });
 }
 
 onMounted(fetchDetail);

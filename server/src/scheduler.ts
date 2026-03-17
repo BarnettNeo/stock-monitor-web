@@ -9,6 +9,10 @@ import { rowToSubscription } from './mappers';
 
 type StrategyRow = any;
 
+export type SchedulerHandle = {
+  stop: () => void;
+};
+
 function buildMarkdownFromEvent(ev: any): { title: string; markdown: string } {
   return buildNotifyPayload(ev, 'dingtalk');
 }
@@ -102,11 +106,15 @@ export async function scanOnce(): Promise<void> {
   persist();
 }
 
-export async function startScheduler(): Promise<void> {
+export async function startScheduler(): Promise<SchedulerHandle> {
   console.log('扫码策略时间间隔:', process.env.SCAN_INTERVAL_MS);
   const intervalMs = Number(process.env.SCAN_INTERVAL_MS || 15000);
   await scanOnce();
-  setInterval(() => {
+  const timer = setInterval(() => {
     scanOnce().catch((err) => console.error('scanOnce error:', err));
   }, intervalMs);
+
+  return {
+    stop: () => clearInterval(timer),
+  };
 }

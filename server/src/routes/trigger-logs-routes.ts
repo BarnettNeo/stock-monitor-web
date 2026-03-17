@@ -2,8 +2,8 @@ import type { Express, Request, Response } from 'express';
 
 import { getDb } from '../db';
 import { requireAuth } from '../auth';
-import { fetchRecentPriceData } from '../engine';
-import { calculateIndicatorSnapshot } from '../engine';
+import { fetchRecentPriceData, calculateIndicatorSnapshot } from '../engine';
+import { formatDate } from '../utils';
 
 // 触发日志查询 API（支持分页与查询参数）
 export function registerTriggerLogRoutes(app: Express): void {
@@ -76,7 +76,7 @@ export function registerTriggerLogRoutes(app: Express): void {
       const snapshot = JSON.parse(row.snapshot_json);
       return {
         id: row.id,
-        createdAt: row.created_at,
+        createdAt: formatDate(row.created_at),
         userId: row.user_id,
         strategyId: row.strategy_id,
         subscriptionId: row.subscription_id,
@@ -113,7 +113,7 @@ export function registerTriggerLogRoutes(app: Express): void {
     const snapshot = JSON.parse((row as any).snapshot_json);
     const item = {
       id: row.id,
-      createdAt: row.created_at,
+      createdAt: formatDate(row.created_at),
       userId: row.user_id,
       strategyId: row.strategy_id,
       subscriptionId: row.subscription_id,
