@@ -5,14 +5,12 @@ import { getDb } from '../db';
 import { fetchStockDataBatch } from '../engine';
 import { formatDate } from '../utils';
 
-// 大屏数据接口需要按“当天”聚合 trigger_logs。
-// trigger_logs.created_at 使用 ISO 字符串（UTC，如 2026-03-17T10:20:30.000Z）。
-// 因此按天过滤时必须使用 UTC 日期（toISOString().slice(0,10)），否则会出现“今天看不到数据”的问题。
-function getTodayStr(): string {
-  return new Date().toISOString().slice(0, 10);
+function getLocalDayRangeUtcIso(): { startIso: string; endIso: string } {
+  const now = new Date();
+  const startLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate(), 0, 0, 0, 0);
+  const endLocal = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1, 0, 0, 0, 0);
+  return { startIso: startLocal.toISOString(), endIso: endLocal.toISOString() };
 }
-
-
 
 function uniqueSymbolsFromEnabledStrategies(rows: any[]): string[] {
   const set = new Set<string>();
@@ -47,7 +45,7 @@ export function registerDashboardRoutes(app: Express): void {
     const isAdmin = user.role === 'admin';
     const userId = user.userId
 
-    const today = getTodayStr();
+    const { startIso, endIso } = getLocalDayRangeUtcIso();
 
     let strategyWhere = isAdmin ? '' : 'WHERE user_id = ?';
     const strategyParams = isAdmin ? [] : [userId];
@@ -65,8 +63,8 @@ export function registerDashboardRoutes(app: Express): void {
 
     const since = typeof req.query.since === 'string' ? String(req.query.since).trim() : '';
 
-    let logWhere = 'WHERE substr(created_at,1,10) = ?';
-    const logParams: any[] = [today];
+    let logWhere = 'WHERE created_at >= ? AND created_at < ?';
+    const logParams: any[] = [startIso, endIso];
     if (!isAdmin) {
       logWhere += ' AND user_id = ?';
       logParams.push(userId);
@@ -98,8 +96,10 @@ export function registerDashboardRoutes(app: Express): void {
     );
     latestStmt.bind(logParams);
     const latestTriggers: any[] = [];
+    let latestCreatedAtIso: string | null = null;
     while (latestStmt.step()) {
       const r: any = latestStmt.getAsObject();
+      if (!latestCreatedAtIso) latestCreatedAtIso = String(r.created_at || '') || null;
       latestTriggers.push({
         id: String(r.id),
         createdAt: formatDate(String(r.created_at || '')),
@@ -133,17 +133,17 @@ export function registerDashboardRoutes(app: Express): void {
       deltaStmt.free();
     }
 
-    const trendStmt = db.prepare(
-      `SELECT substr(created_at,12,2) AS hh, COUNT(*) AS cnt
-       FROM trigger_logs ${logWhere}
-       GROUP BY hh`,
-    );
-    trendStmt.bind(logParams);
     const hourCountMap = new Map<string, number>();
+    const trendStmt = db.prepare(`SELECT created_at FROM trigger_logs ${logWhere}`);
+    trendStmt.bind(logParams);
     while (trendStmt.step()) {
       const r: any = trendStmt.getAsObject();
-      const hh = String(r.hh || '00').padStart(2, '0');
-      hourCountMap.set(`${hh}:00`, Number(r.cnt || 0));
+      const iso = String(r.created_at || '');
+      const d = new Date(iso);
+      if (isNaN(d.getTime())) continue;
+      const hh = String(d.getHours()).padStart(2, '0');
+      const key = `${hh}:00`;
+      hourCountMap.set(key, (hourCountMap.get(key) || 0) + 1);
     }
     trendStmt.free();
 
@@ -182,6 +182,7 @@ export function registerDashboardRoutes(app: Express): void {
       latestTriggerDetailId: latestTriggers[0]?.id,
       cursor: {
         latestCreatedAt: latestTriggers[0]?.createdAt || null,
+        latestCreatedAtIso,
       },
     });
   });

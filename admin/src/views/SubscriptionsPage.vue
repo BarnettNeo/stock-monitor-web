@@ -3,7 +3,7 @@
     <el-card>
       <template #header>
         <div style="display:flex; justify-content: space-between; align-items:center">
-          <div>订阅管理</div>
+          <div>订阅列表</div>
           <div style="display:flex; gap: 8px; align-items:center">
             <el-input v-model="qName" placeholder="名称" style="width: 180px" clearable />
             <el-input v-model="qUsername" placeholder="用户名" style="width: 180px" clearable />

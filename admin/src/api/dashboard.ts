@@ -38,6 +38,7 @@ export type ScreenOverview = {
   latestTriggerDetailId?: string;
   cursor?: {
     latestCreatedAt?: string | null;
+    latestCreatedAtIso?: string | null;
   };
 };
 

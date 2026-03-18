@@ -298,6 +298,7 @@ function renderTrend(): void {
   const x = points.map((p) => p.time);
   const y = points.map((p) => p.count);
 
+  trendChart.clear();
   trendChart.setOption({
     backgroundColor: 'transparent',
     grid: { left: 40, right: 20, top: 0, bottom: 20 },
@@ -332,7 +333,7 @@ function renderTrend(): void {
         symbolSize: 6,
       },
     ],
-  });
+  }, { notMerge: true });
 }
 
 function renderMiniKline(): void {
@@ -406,7 +407,7 @@ async function refresh(): Promise<void> {
   try {
     const overview = await fetchOverviewPreferAggregate();
     data.value = overview;
-    const cursorCreatedAt = overview.cursor?.latestCreatedAt;
+    const cursorCreatedAt = overview.cursor?.latestCreatedAtIso || overview.cursor?.latestCreatedAt;
     if (cursorCreatedAt) {
       since.value = cursorCreatedAt;
     }
