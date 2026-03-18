@@ -33,6 +33,28 @@ const StrategyInputSchema = z.object({
   enablePatternSignal: z.boolean().default(false),
 });
 
+function validateSubscriptionOwnership(
+  db: any,
+  user: { userId: string; role: 'admin' | 'user' },
+  subscriptionIds: string[] | undefined,
+): { ok: true } | { ok: false; status: number; message: string } {
+  if (!subscriptionIds || subscriptionIds.length === 0) return { ok: true };
+  if (user.role === 'admin') return { ok: true };
+
+  for (const subId of subscriptionIds) {
+    const stmt = db.prepare('SELECT user_id FROM subscriptions WHERE id = ?');
+    stmt.bind([subId]);
+    const row = stmt.step() ? stmt.getAsObject() : null;
+    stmt.free();
+
+    if (!row) return { ok: false, status: 400, message: '订阅不存在' };
+    const ownerId = (row as any).user_id ? String((row as any).user_id) : '';
+    if (ownerId !== user.userId) return { ok: false, status: 403, message: 'Forbidden' };
+  }
+
+  return { ok: true };
+}
+
 export function registerStrategyRoutes(app: Express): void {
   app.get('/api/strategies', async (req: Request, res: Response) => {
     const user = await requireAuth(req, res);
@@ -146,6 +168,9 @@ export function registerStrategyRoutes(app: Express): void {
       const ts = nowIso();
       const db = await getDb();
 
+      const subCheck = validateSubscriptionOwnership(db, user, parsed.subscriptionIds);
+      if (!subCheck.ok) return res.status(subCheck.status).json({ message: subCheck.message });
+
       const subscriptionIdsJson = parsed.subscriptionIds && parsed.subscriptionIds.length > 0
         ? JSON.stringify(parsed.subscriptionIds)
         : null;
@@ -206,6 +231,9 @@ export function registerStrategyRoutes(app: Express): void {
       if (user.role !== 'admin' && ownerId !== user.userId) {
         return res.status(403).json({ message: 'Forbidden' });
       }
+
+      const subCheck = validateSubscriptionOwnership(db, user, parsed.subscriptionIds);
+      if (!subCheck.ok) return res.status(subCheck.status).json({ message: subCheck.message });
 
       const subscriptionIdsJson = parsed.subscriptionIds && parsed.subscriptionIds.length > 0
         ? JSON.stringify(parsed.subscriptionIds)

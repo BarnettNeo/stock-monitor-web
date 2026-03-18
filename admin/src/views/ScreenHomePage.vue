@@ -301,7 +301,7 @@ function renderTrend(): void {
   trendChart.clear();
   trendChart.setOption({
     backgroundColor: 'transparent',
-    grid: { left: 40, right: 20, top: 0, bottom: 20 },
+    grid: { left: 40, right: 20, top: 20, bottom: 20 },
     xAxis: {
       type: 'category',
       data: x,

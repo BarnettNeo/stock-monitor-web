@@ -1,13 +1,19 @@
 node_modules/
 dist/
 
+# 数据库文件
+*.sqlite
+*.sqlite3
+*.db
+server/data/
+
 # OpenSpec - 提交核心规范，忽略临时文件
 !openspec/specs/
 !openspec/changes/
 !openspec/AGENTS.md
 !openspec/project.md
 # 但忽略可能的本地缓存
-openspec/.cache/
+openspec/.cache/ 
 openspec/tmp/
 openspec/*.log
 

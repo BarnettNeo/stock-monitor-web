@@ -1,5 +1,5 @@
 <template>
-  <div class="container" style="height: 100%; display:flex; align-items:center; justify-content:center; padding: 24px">
+  <div class="page-container" style="width: 100%; height: 100%; display:flex; align-items:center; justify-content:center; padding: 24px">
     <el-card style="width: 420px">
       <template #header>
         <div style="font-weight: 700">登录</div>
@@ -75,7 +75,7 @@ async function submit() {
 }
 </script>
 <style scoped>
-.container {
+.page-container {
   background: url('@asstes/images/bg.png') no-repeat center center;
   background-size: cover;
   box-sizing: border-box;

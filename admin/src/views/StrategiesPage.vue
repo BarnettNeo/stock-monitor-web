@@ -168,7 +168,7 @@
             placeholder="选择推送订阅（留空=只记录日志不推送）"
           >
             <el-option
-              v-for="s in subscriptions"
+              v-for="s in selectableSubscriptions"
               :key="s.id"
               :label="`${s.name} (${s.type})`"
               :value="s.id"
@@ -236,7 +236,7 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, ref } from 'vue';
+import { computed, onMounted, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api';
 import { useListFetcher } from '../composables/useListFetcher';
@@ -269,12 +269,16 @@ type StrategyDto = {
 
 type SubscriptionDto = {
   id: string;
+  userId?: string | null;
   name: string;
   type: 'dingtalk' | 'wecom_robot' | 'wecom_app';
+  createdByUsername?: string | null;
 };
 
 const qName = ref('');
 const qUsername = ref('');
+
+const currentUser = ref<{ userId: string; username: string; role: 'admin' | 'user' } | null>(null);
 
 const { loading, items, fetchList } = useListFetcher<StrategyDto>(async () => {
   const res = await api.get('/strategies', {
@@ -287,8 +291,19 @@ const { loading, items, fetchList } = useListFetcher<StrategyDto>(async () => {
 });
 
 const { items: subscriptions, fetchList: fetchSubscriptions } = useListFetcher<SubscriptionDto>(async () => {
-  const res = await api.get('/subscriptions');
+  const params =
+    currentUser.value && currentUser.value.role !== 'admin'
+      ? { username: currentUser.value.username }
+      : undefined;
+  const res = await api.get('/subscriptions', { params });
   return res.data.items;
+});
+
+const selectableSubscriptions = computed(() => {
+  if (currentUser.value?.role === 'admin') return subscriptions.value;
+  const uid = currentUser.value?.userId;
+  if (!uid) return [];
+  return subscriptions.value.filter((s) => s.userId === uid);
 });
 
 const dialogVisible = ref(false);
@@ -459,7 +474,17 @@ async function remove(id: string) {
   }
 }
 
-onMounted(() => {
+async function getUserInfo() {
+  try {
+    const res = await api.get('/auth/me');
+    currentUser.value = res.data?.user || null;
+  } catch {
+    currentUser.value = null;
+  }
+}
+
+onMounted(async () => {
+  await getUserInfo();
   fetchList();
   fetchSubscriptions();
 });
