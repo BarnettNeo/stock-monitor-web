@@ -10,6 +10,7 @@ import { openapiDoc } from './openapi';
 import { startScheduler } from './scheduler';
 import { registerAuthRoutes } from './routes/auth-routes';
 import { registerDashboardRoutes } from './routes/dashboard-routes';
+import { registerQuoteRoutes } from './routes/quotes-routes';
 import { registerStrategyRoutes } from './routes/strategies-routes';
 import { registerSubscriptionRoutes } from './routes/subscriptions-routes';
 import { registerTriggerLogRoutes } from './routes/trigger-logs-routes';
@@ -40,6 +41,7 @@ app.use('/api-docs', (swaggerUi.serve as any), (swaggerUi.setup(openapiDoc as an
 
 registerAuthRoutes(app);
 registerDashboardRoutes(app);
+registerQuoteRoutes(app);
 registerStrategyRoutes(app);
 registerSubscriptionRoutes(app);
 registerTriggerLogRoutes(app);

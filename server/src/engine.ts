@@ -174,8 +174,9 @@ async function fetchHistoryCloses(code: string, period: string = '1'): Promise<n
 }
 
 // 获取最近价格数据的内部实现函数
-export async function fetchRecentPriceData(code: string, period: string = '1'): Promise<PriceData[]> {
-  const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${code}&scale=${period}&datalen=240`;
+export async function fetchKLineData(code: string, scale: string = '1', datalen: number = 240): Promise<PriceData[]> {
+  const safeLen = Math.max(1, Math.min(500, Number(datalen) || 240));
+  const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${code}&scale=${scale}&datalen=${safeLen}`;
   const response = await axios.get(url, {
     timeout: 5000,
     headers: {
@@ -209,6 +210,11 @@ export async function fetchRecentPriceData(code: string, period: string = '1'): 
     .filter((p: PriceData | null): p is PriceData => p !== null);
 
   return prices;
+}
+
+// 获取最近价格数据的内部实现函数
+export async function fetchRecentPriceData(code: string, period: string = '1'): Promise<PriceData[]> {
+  return fetchKLineData(code, period, 240);
 }
 
 // 计算指标快照

@@ -52,6 +52,62 @@
         <el-form-item label="Webhook URL" prop="webhookUrl">
           <el-input v-model="form.webhookUrl" />
         </el-form-item>
+
+        <el-form-item label="获取说明">
+          <div style="display:flex; gap: 8px; flex-wrap: wrap; align-items: center;">
+            <el-popover placement="top-start" :width="560" trigger="click">
+              <template #reference>
+                <el-button size="small">钉钉 Webhook 获取</el-button>
+              </template>
+              <div style="font-size: 13px; line-height: 1.6;">
+                <div style="font-weight: 700; margin-bottom: 6px;">钉钉自定义机器人 Webhook URL 获取（钉钉开放平台）</div>
+                <ol style="padding-left: 18px; margin: 0;">
+                  <li>打开钉钉，进入目标群聊（仅支持群聊）。</li>
+                  <li>点击群聊右上角 → 设置图标 → 选择 群管理 → 机器人。</li>
+                  <li>点击 添加机器人 → 选择 自定义。</li>
+                  <li>填写机器人名称、上传头像，按需配置 安全设置（关键词/加签/IP 白名单）。</li>
+                  <li>勾选协议，点击 完成。</li>
+                  <li>生成后直接复制 Webhook 地址（格式：https://oapi.dingtalk.com/robot/send?access_token=xxx）</li>
+                </ol>
+                <div style="margin-top: 8px;">
+                  <el-alert
+                    title="安全提示"
+                    type="warning"
+                    :closable="false"
+                    show-icon
+                    description="Webhook 包含 access_token，严禁泄露，否则他人可随意向该群发送消息。"
+                  />
+                </div>
+              </div>
+            </el-popover>
+
+            <el-popover placement="top-start" :width="560" trigger="click">
+              <template #reference>
+                <el-button size="small">企业微信 Webhook 获取</el-button>
+              </template>
+              <div style="font-size: 13px; line-height: 1.6;">
+                <div style="font-weight: 700; margin-bottom: 6px;">企业微信自定义机器人 Webhook URL 获取</div>
+                <ol style="padding-left: 18px; margin: 0;">
+                  <li>打开企业微信，进入目标群聊。</li>
+                  <li>点击群聊右上角 → 更多 → 选择 添加群机器人。</li>
+                  <li>选择 新创建一个机器人。</li>
+                  <li>填写机器人名称，点击 添加机器人。</li>
+                  <li>生成后直接复制地址（格式：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx）</li>
+                </ol>
+                <div style="margin-top: 8px;">
+                  <el-alert
+                    title="安全提示"
+                    type="warning"
+                    :closable="false"
+                    show-icon
+                    description="仅机器人创建者可查看 Webhook 地址，key 泄露会导致消息被滥用。"
+                  />
+                </div>
+              </div>
+            </el-popover>
+          </div>
+        </el-form-item>
+
         <el-form-item label="关键词">
           <el-input v-model="form.keyword" placeholder="可选" />
         </el-form-item>

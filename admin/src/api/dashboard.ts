@@ -31,6 +31,7 @@ export type ScreenOverview = {
   serverTime?: string;
   serverTimeIso?: string;
   kpis: ScreenKpis;
+  focusSymbols?: string[];
   latestTriggers: ScreenLatestTrigger[];
   deltaTriggers?: ScreenLatestTrigger[];
   todayTrend: ScreenTrendPoint[];
@@ -49,4 +50,31 @@ export async function getScreenOverview(params?: { since?: string | null }): Pro
     },
   });
   return res.data as ScreenOverview;
+}
+
+export type HotMoverItem = {
+  code: string;
+  name?: string;
+  currentPrice?: number;
+  changePercent?: number;
+  returnNd?: number;
+};
+
+export type HotMoversResponse = {
+  serverTime?: string;
+  windowDays: number;
+  limit: number;
+  gainers: HotMoverItem[];
+  losers: HotMoverItem[];
+  cached?: boolean;
+};
+
+export async function getHotMovers(params?: { windowDays?: number; limit?: number }): Promise<HotMoversResponse> {
+  const res = await api.get('/dashboard/hot-movers', {
+    params: {
+      windowDays: params?.windowDays,
+      limit: params?.limit,
+    },
+  });
+  return res.data as HotMoversResponse;
 }

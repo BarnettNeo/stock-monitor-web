@@ -16,6 +16,7 @@ export interface PatternSignal {
   message: string;
 }
 
+// 计算信号强度
 function calculateStrength(prices: PriceData[], referencePrice: number): number {
   if (prices.length < 5) return 50;
 
@@ -31,6 +32,7 @@ function calculateStrength(prices: PriceData[], referencePrice: number): number 
   return Math.round(strength);
 }
 
+// 检测突破回踩信号
 export function detectBreakoutPullback(
   prices: PriceData[],
   lookbackDays: number = 20,

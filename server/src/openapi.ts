@@ -117,6 +117,34 @@ export const openapiDoc = {
         responses: { '200': { description: 'OK' } },
       },
     },
+    '/api/dashboard/screen': {
+      get: {
+        summary: 'Big screen dashboard overview',
+        parameters: [{ name: 'since', in: 'query', required: false, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/dashboard/hot-movers': {
+      get: {
+        summary: 'Hot movers (gainers/losers) by N-day return',
+        parameters: [
+          { name: 'windowDays', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 10 } },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 50 } },
+        ],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/quotes/kline': {
+      get: {
+        summary: 'Get KLine close series for a symbol',
+        parameters: [
+          { name: 'symbol', in: 'query', required: true, schema: { type: 'string' } },
+          { name: 'scale', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'datalen', in: 'query', required: false, schema: { type: 'integer', minimum: 10, maximum: 500 } },
+        ],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
     '/openapi.json': {
       get: {
         summary: 'OpenAPI JSON',

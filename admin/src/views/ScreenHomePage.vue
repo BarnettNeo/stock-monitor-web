@@ -1,6 +1,6 @@
 <template>
   <div class="screen min-h-screen text-slate-200 p-4 box-border">
-    <div class="flex items-center justify-between p-3 px-4 border border-slate-400/20 rounded-lg bg-slate-900/60 backdrop-blur">
+    <div class="panel panel--strong flex items-center justify-between p-3 px-4">
       <div class="text-xl font-extrabold tracking-wide">监控大盘</div>
       <div class="flex gap-2 items-center">
         <div class="text-slate-300 tabular-nums">{{ displayTime }}</div>
@@ -10,7 +10,7 @@
     </div>
 
     <div v-if="currentUser && currentUser.role !== 'admin' && data?.kpis?.monitoredSymbols === 0" class="mt-3">
-      <div class=" border border-slate-400/20 rounded-lg bg-slate-900/60 backdrop-blur">
+      <div class="panel panel--strong">
         <div class="text-center p-6">
           <p class="text-lg mb-4">您当前还没有配置任何监控策略。</p>
           <el-button type="primary" @click="goToStrategies">前往配置</el-button>
@@ -18,59 +18,28 @@
       </div>
     </div>
 
+    <!-- 监控大盘卡片 -->
     <div v-else class="grid grid-cols-4 gap-3 mt-3 max-[1280px]:grid-cols-2">
-      <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-4">
-        <div class="text-slate-400 text-xs">运行中策略</div>
-        <div class="mt-2 text-2xl font-extrabold tabular-nums">{{ data?.kpis?.runningStrategies ?? '-' }}</div>
-      </div>
-      <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-4">
-        <div class="text-slate-400 text-xs">今日触发</div>
-        <div class="mt-2 text-2xl font-extrabold tabular-nums">{{ data?.kpis?.todayTriggers ?? '-' }}</div>
-      </div>
-      <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-4">
-        <div class="text-slate-400 text-xs">推送成功</div>
-        <div class="mt-2 text-2xl font-extrabold tabular-nums">
-          <template v-if="typeof data?.kpis?.pushSuccessRate === 'number'">
-            {{ Math.round((data!.kpis!.pushSuccessRate || 0) * 100) }}%
-          </template>
-          <template v-else>-</template>
-        </div>
-      </div>
-      <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-4">
-        <div class="text-slate-400 text-xs">监控股票数</div>
-        <div class="mt-2 text-2xl font-extrabold tabular-nums">{{ data?.kpis?.monitoredSymbols ?? '-' }}</div>
+      <div v-for="c in kpiCards" :key="c.label" class="panel p-4">
+        <div class="kpi-label">{{ c.label }}</div>
+        <div class="kpi-value tabular-nums">{{ c.value }}</div>
       </div>
     </div>
 
-    <div class="grid grid-cols-[1.2fr_1fr] gap-3 mt-3 max-[1280px]:grid-cols-1">
-      <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-3">
-        <div class="font-extrabold mb-2">实时触发动态</div>
+    <!-- 实时触发动态卡片 -->
+    <div class="grid grid-cols-[1fr_1fr] gap-3 mt-3 max-[1280px]:grid-cols-1">
+      <div class="panel p-3">
+        <div class="panel-title">实时触发动态</div>
         <div class="h-[260px] overflow-hidden" v-loading="loading && !data">
           <div v-if="!data?.latestTriggers?.length" class="text-slate-400 p-6">暂无数据</div>
           <div v-else ref="feedContainerEl" class="feed-container">
             <div ref="feedListEl" class="feed-list">
               <div
-                v-for="item in feedItems"
-                :key="item.id"
+                v-for="(item, idx) in feedLoopItems"
+                :key="item.id + '-' + idx"
                 class="grid grid-cols-[200px_1fr] gap-2 p-2 rounded cursor-pointer hover:bg-slate-400/10"
                 @click="openTrigger(item.id)"
-              >
-                <div class="text-slate-400 tabular-nums">{{ item.createdAt }}</div>
-                <div>
-                  <div class="flex gap-2 items-baseline">
-                    <span class="font-extrabold">{{ item.stockName || item.symbol }}</span>
-                    <span class="text-slate-200">{{ item.reason }}</span>
-                  </div>
-                  <div class="text-slate-500 text-xs">{{ item.symbol }}</div>
-                </div>
-              </div>
-              <!-- 视觉副本，用于无缝滚动 -->
-              <div
-                v-for="item in feedItems"
-                :key="item.id + '-clone'"
-                class="grid grid-cols-[200px_1fr] gap-2 p-2 rounded cursor-pointer hover:bg-slate-400/10"
-                @click="openTrigger(item.id)"
-                aria-hidden="true"
+                :aria-hidden="idx >= feedItems.length ? 'true' : undefined"
               >
                 <div class="text-slate-400 tabular-nums">{{ item.createdAt }}</div>
                 <div>
@@ -88,33 +57,70 @@
         <el-button class="toLogsBtn" size="small" type="primary" @click="goToLogs">查看全部触发记录</el-button>
       </div>
 
-      <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-3">
-        <div class="font-extrabold mb-2">今日触发趋势</div>
+      <div class="panel p-3">
+        <div class="panel-title">今日触发趋势</div>
         <div ref="trendEl" class="h-[300px] w-full"></div>
       </div>
     </div>
 
-    <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-3 mt-3">
-      <div class="font-extrabold mb-2">重点关注股票</div>
-      <div v-loading="loading && !data">
-        <div v-if="!data?.watchlist?.length" class="text-slate-400 p-6">暂无监控标的</div>
-        <div v-else class="grid grid-cols-6 gap-2 max-[1280px]:grid-cols-3">
-          <div v-for="s in data.watchlist" :key="s.code" class="border border-slate-400/20 rounded-lg p-3 bg-slate-950/30">
-            <div class="font-extrabold truncate">{{ s.name || s.code }}</div>
-            <div class="text-slate-400 text-xs mt-1">{{ s.code }}</div>
-            <div class="flex justify-between items-baseline mt-2">
-              <span class="text-lg font-extrabold tabular-nums">{{ formatPrice(s.currentPrice) }}</span>
-              <span class="text-xs tabular-nums" :class="changeClass(s.changePercent)">
-                {{ formatChange(s.changePercent) }}
-              </span>
+    <div class="grid grid-cols-[1fr_1fr] gap-3 mt-3 max-[1280px]:grid-cols-1">
+      <!-- 重点关注股票卡片 -->
+      <div class="panel p-3 mt-3">
+        <div class="flex items-center gap-3 mb-2">
+          <div class="panel-title mb-0">重点关注股票</div>
+          <el-select
+            v-model="focusSymbol"
+            placeholder="请选择股票"
+            filterable
+            class="!w-[220px]"
+            :disabled="focusSymbolOptions.length === 0"
+          >
+            <el-option v-for="s in focusSymbolOptions" :key="s.code" :label="s.name" :value="s.code" />
+          </el-select>
+        </div>
+        <div v-loading="focusLoading || (loading && !data)">
+          <div v-if="focusSymbolOptions.length === 0" class="text-slate-400 p-6">暂无监控标的</div>
+          <div v-else ref="focusChartEl" class="h-[260px] w-full"></div>
+        </div>
+      </div>
+
+      <!-- 热门股票分析 -->
+      <div class="panel p-3 mt-3">
+        <div class="panel-title">热门股票分析</div>
+        <div class="h-[220px]"></div>
+      </div>
+  </div>
+    <!-- 近3日上涨股票卡片 -->
+    <div class="grid grid-cols-2 gap-3 mt-3 max-[1280px]:grid-cols-1">
+      <div v-for="block in hotBlocks" :key="block.key" class="panel p-3">
+        <div class="flex items-baseline justify-between mb-2">
+          <div class="panel-title mb-0">{{ block.title }}</div>
+          <div class="text-slate-500 text-xs tabular-nums">{{ hotServerTime || '' }}</div>
+        </div>
+        <div v-loading="hotLoading">
+          <div v-if="block.items.length === 0" class="text-slate-400 p-6">暂无数据</div>
+          <div v-else class="grid grid-cols-2 gap-2 max-[1280px]:grid-cols-1">
+            <div v-for="s in block.items" :key="s.code" class="panel-item p-3">
+              <div class="flex justify-between items-baseline gap-2">
+                <div class="font-extrabold truncate">{{ s.name || s.code }}</div>
+                <div class="text-xs tabular-nums" :class="changeClass(s.returnNd)">{{ formatChange(s.returnNd) }}</div>
+              </div>
+              <div class="text-slate-400 text-xs mt-1">{{ s.code }}</div>
+              <div class="flex justify-between items-baseline mt-2">
+                <span class="tabular-nums">{{ formatPrice(s.currentPrice) }}</span>
+                <span class="text-xs tabular-nums" :class="changeClass(s.changePercent)">
+                  {{ formatChange(s.changePercent) }}
+                </span>
+              </div>
             </div>
           </div>
         </div>
       </div>
     </div>
 
-    <div class="border border-slate-400/20 rounded-lg bg-slate-900/50 p-3 mt-3">
-      <div class="font-extrabold mb-2">最近一次异动详情</div>
+    <!-- 最近一次异动详情卡片 -->
+    <div class="panel p-3 mt-3">
+      <div class="panel-title">最近一次异动详情</div>
       <div v-loading="detailLoading">
         <div v-if="!detail" class="text-slate-400 p-6">暂无触发详情</div>
         <div v-else class="grid grid-cols-[420px_1fr] gap-3 items-stretch max-[1280px]:grid-cols-1">
@@ -140,8 +146,11 @@ import * as echarts from 'echarts';
 import { ElMessage } from 'element-plus';
 
 import { api } from '../api';
-import type { ScreenOverview, ScreenLatestTrigger, ScreenTrendPoint, WatchItem, ScreenKpis } from '../api/dashboard';
-import { getScreenOverview } from '../api/dashboard';
+import type { HotMoverItem, ScreenOverview, ScreenLatestTrigger, ScreenTrendPoint, WatchItem, ScreenKpis } from '../api/dashboard';
+import { getHotMovers, getScreenOverview } from '../api/dashboard';
+import type { KlineCloseItem } from '../api/quotes';
+import { getKlineCloseSeries } from '../api/quotes';
+import { ensureChart, setLineChart } from '../utils/charts';
 import { Setting } from '@element-plus/icons-vue';
 
 type TriggerDetail = {
@@ -181,26 +190,67 @@ const detail = ref<TriggerDetail | null>(null);
 
 const trendEl = ref<HTMLDivElement | null>(null);
 const miniKlineEl = ref<HTMLDivElement | null>(null);
+const focusChartEl = ref<HTMLDivElement | null>(null);
 
 let trendChart: echarts.ECharts | null = null;
 let miniChart: echarts.ECharts | null = null;
+let focusChart: echarts.ECharts | null = null;
 
 let timer: number | null = null;
 let clockTimer: number | null = null;
 let inflight = false;
 let feedTimer: number | null = null;
+let hotTimer: number | null = null;
+let hotInflight = false;
 
 const pendingFeedQueue = ref<ScreenLatestTrigger[]>([]);
 
-function getToday(): string {
+const focusSymbol = ref<string>('');
+const focusLoading = ref(false);
+const focusSeries = ref<KlineCloseItem[]>([]);
+
+const focusSymbolOptions = computed(() => {
+  const fromWatch = Array.isArray(data.value?.watchlist) ? data.value!.watchlist : [];
+  return fromWatch;
+});
+
+const hotLoading = ref(false);
+const hotServerTime = ref<string>('');
+const hotGainers = ref<HotMoverItem[]>([]);
+const hotLosers = ref<HotMoverItem[]>([]);
+
+const kpiCards = computed(() => {
+  const kpis = data.value?.kpis;
+  const push =
+    typeof kpis?.pushSuccessRate === 'number'
+      ? `${Math.round((kpis.pushSuccessRate || 0) * 100)}%`
+      : '-';
+  return [
+    { label: '运行中策略', value: kpis?.runningStrategies ?? '-' },
+    { label: '今日触发', value: kpis?.todayTriggers ?? '-' },
+    { label: '推送成功', value: push },
+    { label: '监控股票数', value: kpis?.monitoredSymbols ?? '-' },
+  ];
+});
+
+const feedLoopItems = computed(() => {
+  const base = feedItems.value || [];
+  if (base.length === 0) return [];
+  return base.concat(base);
+});
+
+const hotBlocks = computed(() => [
+  { key: 'gainers', title: '近3日上涨股票', items: hotGainers.value },
+  { key: 'losers', title: '近3日下跌股票', items: hotLosers.value },
+]);
+
+function getLocalDateStr(): string {
   const d = new Date();
   const y = d.getFullYear();
   const m = String(d.getMonth() + 1).padStart(2, '0');
   const day = String(d.getDate()).padStart(2, '0');
   return `${y}-${m}-${day}`;
 }
-
-
 
 function formatPrice(v: any): string {
   const n = Number(v);
@@ -223,7 +273,9 @@ function changeClass(v: any): string {
   return '';
 }
 
-// 优先请求后端聚合接口；若接口不可用则用已有接口做前端聚合兜底。
+// 大屏核心数据源：
+// - 优先请求后端聚合接口（/dashboard/screen）
+// - 后端不可用时降级为“前端聚合”（统计口径会受 pageSize 影响）
 async function fetchOverviewPreferAggregate(): Promise<ScreenOverview> {
   try {
     return await getScreenOverview({ since: since.value });
@@ -234,7 +286,7 @@ async function fetchOverviewPreferAggregate(): Promise<ScreenOverview> {
 
 async function fetchOverviewFallback(): Promise<ScreenOverview> {
   // 兜底逻辑的统计会受 pageSize 影响（最多 100 条），仅用于接口异常时的降级展示。
-  const today = getToday();
+  const today = getLocalDateStr();
 
   const [strategiesRes, logsRes] = await Promise.all([
     api.get('/strategies'),
@@ -282,6 +334,7 @@ async function fetchOverviewFallback(): Promise<ScreenOverview> {
 
   return {
     kpis,
+    focusSymbols: Array.from(symbols),
     latestTriggers,
     todayTrend,
     watchlist,
@@ -290,97 +343,99 @@ async function fetchOverviewFallback(): Promise<ScreenOverview> {
 }
 
 function renderTrend(): void {
-  // 趋势图只依赖 todayTrend 数据；刷新时重新 setOption 覆盖即可。
-  if (!trendEl.value) return;
-  if (!trendChart) trendChart = echarts.init(trendEl.value);
+  // 今日触发趋势：只依赖 data.todayTrend，数据变更后重绘即可。
+  const chart = ensureChart(trendEl.value, trendChart);
+  if (!chart) return;
+  trendChart = chart;
 
   const points = data.value?.todayTrend || [];
-  const x = points.map((p) => p.time);
-  const y = points.map((p) => p.count);
-
-  trendChart.clear();
-  trendChart.setOption({
-    backgroundColor: 'transparent',
+  setLineChart(chart, {
+    x: points.map((p) => p.time),
+    y: points.map((p) => p.count),
+    color: '#60a5fa',
+    areaOpacity: 0.15,
     grid: { left: 40, right: 20, top: 20, bottom: 20 },
-    xAxis: {
-      type: 'category',
-      data: x,
-      axisLabel: { color: '#cbd5e1' },
-      axisLine: { lineStyle: { color: '#334155' } },
-    },
-    yAxis: {
-      type: 'value',
-      axisLabel: { color: '#cbd5e1' },
-      splitLine: { lineStyle: { color: '#1f2937' } },
-      axisLine: { lineStyle: { color: '#334155' } },
-    },
-    tooltip: { trigger: 'axis' },
-    dataZoom: [
-      {
-        type: 'inside',
-        start: 0,
-        end: 100,
-      },
-    ],
-    series: [
-      {
-        type: 'line',
-        data: y,
-        smooth: true,
-        areaStyle: { opacity: 0.15 },
-        lineStyle: { width: 2 },
-        symbol: 'circle',
-        symbolSize: 6,
-      },
-    ],
-  }, { notMerge: true });
-}
-
-function renderMiniKline(): void {
-  // 迷你 K 线从 trigger-logs/:id 的 kline 字段渲染。
-  if (!miniKlineEl.value) return;
-  if (!miniChart) miniChart = echarts.init(miniKlineEl.value);
-
-  const k = detail.value?.kline || [];
-  const categoryData = k.map((x) => x.date.slice(11, 16)); // 只取 HH:mm
-  const closeData = k.map((x) => x.close);
-
-  miniChart.setOption({
-    backgroundColor: 'transparent',
-    grid: { left: 40, right: 20, top: 30, bottom: 50 }, // 增大 bottom 为 dataZoom 留空间
-    xAxis: {
-      type: 'category',
-      data: categoryData,
-      axisLabel: { color: '#94a3b8', show: true },
-      axisLine: { lineStyle: { color: '#334155' } },
-    },
-    yAxis: {
-      scale: true,
-      axisLabel: { color: '#94a3b8' },
-      splitLine: { lineStyle: { color: '#1f2937' } },
-      axisLine: { lineStyle: { color: '#334155' } },
-    },
-    tooltip: { trigger: 'axis' },
-    dataZoom: [
-      {
-        type: 'inside',
-        start: 0,
-        end: 100,
-      },
-    ],
-    series: [
-      {
-        name: '收盘价',
-        type: 'line',
-        data: closeData,
-        itemStyle: { color: '#60a5fa' }, // 蓝色
-      },
-    ],
   });
 }
 
+function renderMiniKline(): void {
+  // 最近一次触发详情：从 trigger-logs/:id 返回的 kline 绘制“收盘价折线”，轻量展示走势。
+  const chart = ensureChart(miniKlineEl.value, miniChart);
+  if (!chart) return;
+  miniChart = chart;
+  const k = detail.value?.kline || [];
+  chart.setOption(
+    {
+      backgroundColor: 'transparent',
+      grid: { left: 40, right: 20, top: 30, bottom: 50 },
+      xAxis: {
+        type: 'category',
+        data: k.map((x) => x.date.slice(11, 16)),
+        axisLabel: { color: '#94a3b8', show: true },
+        axisLine: { lineStyle: { color: '#334155' } },
+      },
+      yAxis: {
+        scale: true,
+        axisLabel: { color: '#94a3b8' },
+        splitLine: { lineStyle: { color: '#1f2937' } },
+        axisLine: { lineStyle: { color: '#334155' } },
+      },
+      tooltip: { trigger: 'axis' },
+      dataZoom: [{ type: 'inside', start: 0, end: 100 }],
+      series: [
+        {
+          name: '收盘价',
+          type: 'line',
+          data: k.map((x) => x.close),
+          lineStyle: { width: 2, color: '#60a5fa' },
+          itemStyle: { color: '#60a5fa' },
+          symbol: 'circle',
+          symbolSize: 5,
+          smooth: true,
+        },
+      ],
+    },
+    { notMerge: true },
+  );
+}
+
+function renderFocusChart(): void {
+  // 重点关注股票：展示近一段时间收盘价走势（用于快速观察强弱与波动）。
+  const chart = ensureChart(focusChartEl.value, focusChart);
+  if (!chart) return;
+  focusChart = chart;
+  const items = focusSeries.value || [];
+  const x = items.map((p) => {
+    const t = String(p.time || '');
+    if (t.includes(' ')) return t.split(' ')[0];
+    return t;
+  });
+  setLineChart(chart, {
+    x,
+    y: items.map((p) => p.close),
+    color: '#60a5fa',
+    grid: { left: 40, right: 20, top: 20, bottom: 30 },
+  });
+}
+
+async function loadFocusSeries(symbol: string): Promise<void> {
+  // 拉取“重点关注股票”的 K 线收盘价序列，并刷新图表。
+  focusLoading.value = true;
+  try {
+    const res = await getKlineCloseSeries({ symbol, scale: '240', datalen: 60 });
+    focusSeries.value = Array.isArray(res.items) ? res.items : [];
+    await nextTick();
+    renderFocusChart();
+  } catch (e: any) {
+    focusSeries.value = [];
+    ElMessage.error(e?.response?.data?.message || e?.message || '加载K线失败');
+  } finally {
+    focusLoading.value = false;
+  }
+}
+
 async function loadDetail(id: string): Promise<void> {
-  // 大屏只展示最近一次触发的简要信息；详情数据按需请求，避免聚合接口过大。
+  // 大屏只展示最近一次触发的简要信息；详情数据按需请求，避免聚合接口返回过大。
   detailLoading.value = true;
   try {
     const res = await api.get(`/trigger-logs/${id}`);
@@ -396,9 +451,10 @@ async function loadDetail(id: string): Promise<void> {
 }
 
 async function refresh(): Promise<void> {
-  // 刷新策略：
-  // - 同时刻只允许一个请求在途，避免点击/定时触发叠加
-  // - 页面不可见时暂停，减少无意义请求
+  // 大屏刷新（核心链路）：
+  // 1) 拉取后端聚合数据（或前端兜底聚合）
+  // 2) 处理最新触发增量（deltaTriggers -> pendingFeedQueue -> 滚动列表）
+  // 3) 按需加载“最近一次触发详情”（用于右下角迷你图）
   if (inflight) return;
   if (document.hidden) return;
 
@@ -425,8 +481,6 @@ async function refresh(): Promise<void> {
       if (diff.length > 0) enqueueDelta(diff);
     }
 
-    await nextTick();
-    renderTrend();
     if (overview.latestTriggerDetailId) {
       if (!detail.value || detail.value.id !== overview.latestTriggerDetailId) {
         await loadDetail(overview.latestTriggerDetailId);
@@ -441,6 +495,7 @@ async function refresh(): Promise<void> {
 }
 
 function enqueueDelta(items: ScreenLatestTrigger[]): void {
+  // 将新增触发事件入队，由定时器节奏化插入，避免列表瞬间跳动。
   const sorted = [...items].sort((a, b) => String(a.createdAt).localeCompare(String(b.createdAt)));
   const exist = new Set(feedItems.value.map((x) => x.id));
   const queued = new Set(pendingFeedQueue.value.map((x) => x.id));
@@ -452,6 +507,7 @@ function enqueueDelta(items: ScreenLatestTrigger[]): void {
 }
 
 function startFeedTicker(): void {
+  // 按固定节奏把队列里的新触发插到顶部，制造“实时滚动”的观感。
   if (feedTimer) return;
   feedTimer = window.setInterval(() => {
     const next = pendingFeedQueue.value.shift();
@@ -474,6 +530,28 @@ async function refreshNow(): Promise<void> {
   await refresh();
 }
 
+async function refreshHotMovers(): Promise<void> {
+  // 热门涨跌榜：独立于主刷新，刷新频率更低。
+  if (hotInflight) return;
+  if (document.hidden) return;
+
+  hotInflight = true;
+  hotLoading.value = true;
+  try {
+    const res = await getHotMovers({ windowDays: 3, limit: 10 });
+    hotServerTime.value = res.serverTime || '';
+    hotGainers.value = Array.isArray(res.gainers) ? res.gainers : [];
+    hotLosers.value = Array.isArray(res.losers) ? res.losers : [];
+  } catch (e: any) {
+    hotGainers.value = [];
+    hotLosers.value = [];
+    ElMessage.error(e?.response?.data?.message || e?.message || '加载热门榜单失败');
+  } finally {
+    hotLoading.value = false;
+    hotInflight = false;
+  }
+}
+
 function goToLogs(): void {
   router.push('/trigger-logs');
 }
@@ -489,11 +567,13 @@ function openTrigger(id: string): void {
 function onResize(): void {
   trendChart?.resize();
   miniChart?.resize();
+  focusChart?.resize();
 }
 
 function onVisibility(): void {
   if (!document.hidden) {
     refresh();
+    refreshHotMovers();
   }
 }
 
@@ -507,6 +587,10 @@ async function getUserInfo() {
 }
 
 onMounted(() => {
+  // 页面启动：
+  // - 1s 更新时钟
+  // - 8s 刷新主大屏数据
+  // - 10min 刷新热门涨跌榜
   getUserInfo();
   clockTimer = window.setInterval(() => {
     now.value = new Date();
@@ -519,18 +603,26 @@ onMounted(() => {
   timer = window.setInterval(() => {
     refresh();
   }, 8000);
+
+  refreshHotMovers();
+  hotTimer = window.setInterval(() => {
+    refreshHotMovers();
+  }, 10 * 60 * 1000);
 });
 
 onBeforeUnmount(() => {
   if (timer) window.clearInterval(timer);
   if (clockTimer) window.clearInterval(clockTimer);
   if (feedTimer) window.clearInterval(feedTimer);
+  if (hotTimer) window.clearInterval(hotTimer);
   window.removeEventListener('resize', onResize);
   document.removeEventListener('visibilitychange', onVisibility);
   trendChart?.dispose();
   trendChart = null;
   miniChart?.dispose();
   miniChart = null;
+  focusChart?.dispose();
+  focusChart = null;
 });
 
 watch(feedItems, (newItems) => {
@@ -547,6 +639,23 @@ watch(
     nextTick().then(renderTrend);
   },
 );
+
+watch(focusSymbolOptions, (opts) => {
+  if (!opts.length) {
+    focusSymbol.value = '';
+    focusSeries.value = [];
+    return;
+  }
+  if (!focusSymbol.value || !opts.some((x) => x.code === focusSymbol.value)) {
+    focusSymbol.value = opts[0].code;
+  }
+}, { immediate: true });
+
+watch(focusSymbol, (sym) => {
+  console.log('focusSymbol', sym);
+  if (!sym) return;
+  loadFocusSeries(sym);
+});
 </script>
 
 <style scoped>
@@ -554,6 +663,30 @@ watch(
   background: radial-gradient(1200px 700px at 20% 10%, rgba(56, 189, 248, 0.08), transparent),
     radial-gradient(1000px 600px at 80% 20%, rgba(34, 197, 94, 0.06), transparent),
     linear-gradient(180deg, #0b1220, #020617);
+}
+
+.panel {
+  @apply border border-slate-400/20 rounded-lg bg-slate-900/50;
+}
+
+.panel--strong {
+  @apply bg-slate-900/60 backdrop-blur;
+}
+
+.panel-title {
+  @apply font-extrabold mb-2;
+}
+
+.kpi-label {
+  @apply text-slate-400 text-xs;
+}
+
+.kpi-value {
+  @apply mt-2 text-2xl font-extrabold;
+}
+
+.panel-item {
+  @apply border border-slate-400/20 rounded-lg bg-slate-950/30;
 }
 
 .feed-enter-active,
@@ -593,7 +726,7 @@ watch(
 .feed-list {
   animation: scroll-up linear infinite;
 }
-.toLogsBtn{
+.toLogsBtn {
   position: relative;
   margin: 12px auto 0;
   display: block;
