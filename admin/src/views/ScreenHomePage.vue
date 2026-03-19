@@ -103,9 +103,12 @@
             <div v-for="s in block.items" :key="s.code" class="panel-item p-3">
               <div class="flex justify-between items-baseline gap-2">
                 <div class="font-extrabold truncate">{{ s.name || s.code }}</div>
+                <el-button size="small" type="primary" plain @click="goToStrategiesCreate(s.code)">一键添加</el-button>
+              </div>
+              <div class="flex justify-between items-baseline mt-2">
+                <div class="text-slate-400 text-xs mt-1">{{ s.code }}</div>
                 <div class="text-xs tabular-nums" :class="changeClass(s.returnNd)">{{ formatChange(s.returnNd) }}</div>
               </div>
-              <div class="text-slate-400 text-xs mt-1">{{ s.code }}</div>
               <div class="flex justify-between items-baseline mt-2">
                 <span class="tabular-nums">{{ formatPrice(s.currentPrice) }}</span>
                 <span class="text-xs tabular-nums" :class="changeClass(s.changePercent)">
@@ -558,6 +561,10 @@ function goToLogs(): void {
 
 function goToStrategies(): void {
   router.push('/strategies');
+}
+
+function goToStrategiesCreate(code: string): void {
+  router.push({ path: '/strategies', query: { create: '1', code } });
 }
 
 function openTrigger(id: string): void {

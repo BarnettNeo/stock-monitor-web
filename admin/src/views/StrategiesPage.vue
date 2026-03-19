@@ -237,6 +237,9 @@
 
 <script setup lang="ts">
 import { computed, onMounted, ref } from 'vue';
+import { useRoute, useRouter } from 'vue-router';
+const route = useRoute();
+const router = useRouter();
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api';
 import { useListFetcher } from '../composables/useListFetcher';
@@ -367,7 +370,7 @@ const form = ref({
 });
 
 // 打开创建弹窗
-function openCreate() {
+function openCreate(code: string) {
   fetchSubscriptions();
   editing.value = false;
   editingId.value = null;
@@ -375,7 +378,7 @@ function openCreate() {
     name: '新策略',
     enabled: true,
     marketTimeOnly: true,
-    symbols: '',
+    symbols: code || '',
     subscriptionIds: [],
     alertMode: 'percent',
     targetPriceUp: undefined,
@@ -483,9 +486,22 @@ async function getUserInfo() {
   }
 }
 
+function consumeCreateQueryAndOpenDialog(): void {
+  const v = (route.query as any)?.create;
+  const shouldOpen = v === '1' || v === 'true';
+  if (!shouldOpen) return;
+  const code = (route.query as any)?.code;
+  openCreate(code);
+
+  // 清理 query，避免刷新/返回时重复弹窗
+  const { create, ...rest } = (route.query as any) || {};
+  router.replace({ path: route.path, query: rest });
+}
+
 onMounted(async () => {
   await getUserInfo();
   fetchList();
   fetchSubscriptions();
+  consumeCreateQueryAndOpenDialog();
 });
 </script>
