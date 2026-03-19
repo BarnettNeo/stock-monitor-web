@@ -14,6 +14,7 @@ import { registerQuoteRoutes } from './routes/quotes-routes';
 import { registerStrategyRoutes } from './routes/strategies-routes';
 import { registerSubscriptionRoutes } from './routes/subscriptions-routes';
 import { registerTriggerLogRoutes } from './routes/trigger-logs-routes';
+import { registerAgentRoutes } from './routes/agent-routes';
 
 /**
  * server 主入口：
@@ -45,6 +46,8 @@ registerQuoteRoutes(app);
 registerStrategyRoutes(app);
 registerSubscriptionRoutes(app);
 registerTriggerLogRoutes(app);
+registerAgentRoutes(app);
+
 
 app.listen(PORT, () => {
   console.log(`server listening on http://localhost:${PORT}`);
