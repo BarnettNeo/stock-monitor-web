@@ -1,0 +1,19 @@
+schema: spec-driven
+
+context: |
+  This change aligns the Python agents service tools (list_strategies, create_strategy,
+  delete_strategy, query_triggers, get_diagnostic, update_subscription, get_stock_info,
+  generate_report) with the Node.js server capabilities and existing REST APIs.
+  The goal is: natural-language agent flows reliably call real backend abilities,
+  with parameters and responses matching the documented specs.
+
+rules:
+  proposal:
+    - Keep the focus on "agent as orchestration layer" on top of existing strategy / trigger / subscription capabilities.
+  design:
+    - Clearly separate responsibilities: Python agent (LLM + tool selection) vs Node server (business logic + data).
+  tasks:
+    - Break implementation into small, verifiable steps that can be tested via /api/agent/chat.
+  specs:
+    - Each capability spec must describe user-facing behaviors for the 8 tools and how they map to backend APIs.
+

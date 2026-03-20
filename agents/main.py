@@ -1,52 +1,231 @@
-from __future__ import annotations
+import json
+from typing import Any, Dict, List
 
-import os
-from typing import Any, Dict, Optional
+from fastapi import FastAPI, HTTPException
+from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
-from pydantic import BaseModel, Field
+from config import (
+    APP_NAME,
+    SYSTEM_PROMPT,
+    _env,
+    _history_limit,
+    _llm_config,
+    _port,
+    _sanitize_model,
+)
+# from database import db_manager  # 暂时禁用PostgreSQL
+from langchain_integration import langchain_agent
+from llm import build_decision_prompt, call_openai_compatible, extract_json_object, heuristic_tool_calls
+from memory import memory
+from models import AgentChatRequest, AgentChatResponse
+from notifications import notification_manager
+from strategy import handle_create_strategy_flow, looks_like_create_strategy
+# from tasks import send_notification_async  # 暂时禁用Celery
+from tools import format_tool_results, parse_final_reply_from_llm_response, parse_tool_calls_from_llm_response
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """应用生命周期管理"""
+    print("Stock Monitor Agents 2026 startup complete")
+    yield
+    print("Stock Monitor Agents 2026 shutdown")
 
 
-APP_NAME = "stock-monitor-agents"
-
-
-class AgentChatRequest(BaseModel):
-    message: str = Field(..., min_length=1, description="User message")
-    user: Optional[Dict[str, Any]] = Field(default=None, description="User context forwarded from gateway")
-    context: Optional[Dict[str, Any]] = Field(default=None, description="Optional extra context")
-
-
-class AgentChatResponse(BaseModel):
-    reply: str
-    meta: Dict[str, Any] = Field(default_factory=dict)
-
-
-app = FastAPI(title=APP_NAME)
+app = FastAPI(title=APP_NAME, lifespan=lifespan)
 
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
-    return {"ok": True, "service": APP_NAME}
+    """健康检查接口"""
+    cfg = _llm_config()
+    return {
+        "ok": True,
+        "service": APP_NAME,
+        "version": "2026.1.0",
+        "features": [
+            "8个用户意图支持",
+            "通义千问Qwen3-Max集成",
+            "ReAct模式工具调用",
+            "钉钉/企微通知",
+            "LangChain风格架构"
+        ],
+        "llm": {
+            "configured": bool(cfg.get("base_url") and cfg.get("api_key")),
+            "base_url": cfg.get("base_url") or "",
+            "model": cfg.get("model") or "",
+        },
+        "memory": {"redis": bool(_env("REDIS_URL", "")), "historyLimit": _history_limit()},
+    }
+
+
+@app.post("/notifications/subscribe")
+async def subscribe_notification(user_id: str, notifier_type: str, webhook_url: str, secret: str = None):
+    """订阅通知"""
+    try:
+        if notifier_type == "dingtalk":
+            notification_manager.register_dingtalk(user_id, webhook_url, secret)
+        elif notifier_type == "wechat":
+            notification_manager.register_wechat_work(user_id, webhook_url)
+        else:
+            return {"ok": False, "error": "不支持的通知类型"}
+        
+        return {"ok": True, "message": f"{notifier_type} 通知订阅成功"}
+    except Exception as e:
+        return {"ok": False, "error": str(e)}
+
+
+@app.post("/notifications/test")
+async def test_notification(user_id: str, message: str = "这是一条测试消息"):
+    """测试通知发送"""
+    result = await notification_manager.send_notification(user_id, message)
+    return result
+
+
+@app.get("/tools")
+def get_available_tools():
+    """获取可用工具列表"""
+    return {
+        "ok": True,
+        "tools": langchain_agent.get_tool_spec()
+    }
+
+
+@app.get("/storage/info")
+async def get_storage_info():
+    """获取存储信息"""
+    return await memory.get_storage_info()
+
+
+
+
 
 
 @app.post("/agent/chat", response_model=AgentChatResponse)
-def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
-    # NOTE: 这是“脚手架”占位实现：
-    # - 后续可在这里接入 LLM（如 Qwen3）
-    # - 增加 tools 调用（策略/订阅/日志等）
-    # - 接入 Redis 记忆（用户状态）
+async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
+    """聊天接口"""
     message = payload.message.strip()
-    return AgentChatResponse(
-        reply=f"(agents stub) 收到：{message}",
-        meta={"mode": "stub", "user": payload.user or {}},
-    )
+    user_id = str((payload.user or {}).get("userId") or "")
+    tool_results = payload.toolResults or []
 
+    req_model = _sanitize_model((payload.context or {}).get("model") if isinstance(payload.context, dict) else None)
 
-def _port() -> int:
-    try:
-        return int(os.getenv("AGENTS_PORT", "8008"))
-    except Exception:
-        return 8008
+    history = await memory.load(user_id)
+
+    # 1) 若已经有 toolResults：直接让 LLM 基于工具结果生成最终回复
+    if tool_results:
+        messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
+        for m in history:
+            if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str):
+                messages.append({"role": m["role"], "content": m["content"]})
+
+        messages.append({"role": "user", "content": message})
+        messages.append(
+            {
+                "role": "system",
+                "content": f"工具执行结果（JSON）：{json.dumps([tr.model_dump() for tr in tool_results], ensure_ascii=False)}",
+            }
+        )
+        messages.append({"role": "user", "content": "请基于工具结果，给出最终答复。"})
+
+        llm = await call_openai_compatible(messages, model_override=req_model)
+        if not llm.get("ok"):
+            return AgentChatResponse(reply=format_tool_results(tool_results), toolCalls=[], meta={"mode": "no-llm"})
+
+        reply = str(llm.get("reply") or "").strip() or "(empty reply)"
+
+        # 写入记忆：只在最终回复时写 assistant
+        if user_id:
+            await memory.append(user_id, {"role": "assistant", "content": reply})
+
+        cfg = _llm_config()
+        return AgentChatResponse(
+            reply=reply,
+            toolCalls=[],
+            meta={
+                "mode": "llm",
+                "model": req_model or cfg.get("model"),
+                "historyUsed": len(history),
+                "toolResults": len(tool_results),
+            },
+        )
+
+    # 2) 无 toolResults：决定直接回复还是发起 toolCalls
+    #    先把 user 消息写入记忆（只写一次）
+    if user_id:
+        await memory.append(user_id, {"role": "user", "content": message})
+
+    # 无 LLM 时，先用规则兜底出 toolCalls
+    cfg = _llm_config()
+
+    if not (cfg.get("base_url") and cfg.get("api_key")):
+        # 创建策略：即使无 LLM 也尽量做缺参追问/规则抽取
+        state = await memory.load_state(user_id) if user_id else {}
+        pending = state.get("pending") if isinstance(state, dict) else None
+        has_pending_create = bool(isinstance(pending, dict) and pending.get("type") == "create_strategy")
+        if has_pending_create or looks_like_create_strategy(message):
+            return await handle_create_strategy_flow(user_id=user_id, message=message, req_model=req_model, cfg_ok=False)
+
+        calls = heuristic_tool_calls(message)
+        if calls:
+            return AgentChatResponse(reply="", toolCalls=calls, meta={"mode": "no-llm", "decision": "tool_calls"})
+        return AgentChatResponse(
+            reply=f"(agents) LLM未配置：请设置 LLM_BASE_URL / LLM_API_KEY / LLM_MODEL。\n\n你刚才说：{message}",
+            toolCalls=[],
+            meta={"mode": "no-llm", "decision": "final"},
+        )
+
+    # 创建策略：走"字段抽取 + 缺参追问 + 补齐后再创建"的专用流程
+    state = await memory.load_state(user_id) if user_id else {}
+    pending = state.get("pending") if isinstance(state, dict) else None
+    has_pending_create: bool = bool(isinstance(pending, dict) and pending.get("type") == "create_strategy")
+    if has_pending_create or looks_like_create_strategy(message):
+        return await handle_create_strategy_flow(user_id=user_id, message=message, req_model=req_model, cfg_ok=True)
+
+    # 有 LLM：用 JSON decision
+    decision_messages: List[Dict[str, Any]] = [
+        {"role": "system", "content": SYSTEM_PROMPT},
+        {"role": "user", "content": build_decision_prompt(message, has_tool_results=False)},
+    ]
+
+    llm = await call_openai_compatible(decision_messages, model_override=req_model, json_mode=True)
+
+    if not llm.get("ok"):
+        return AgentChatResponse(
+            reply=f"(agents) LLM 调用失败：{llm.get('error')}",
+            toolCalls=[],
+            meta={"mode": "llm_error"},
+        )
+
+    raw = str(llm.get("reply") or "").strip()
+    obj = extract_json_object(raw) or {}
+    typ = str(obj.get("type") or "final")
+
+    if typ == "tool_calls":
+        from models import ToolCall
+        
+        tool_calls_raw = parse_tool_calls_from_llm_response(raw)
+        calls: List[ToolCall] = []
+        for item in tool_calls_raw:
+            calls.append(ToolCall(id=item["id"], name=item["name"], arguments=item["arguments"]))
+
+        if calls:
+            return AgentChatResponse(reply="", toolCalls=calls, meta={"mode": "llm", "decision": "tool_calls"})
+
+        # tool_calls 但解析不到，兜底 final
+        return AgentChatResponse(
+            reply="我需要先调用工具，但当前工具请求解析失败。请换个说法或直接告诉我你要做什么（例如：列出策略 / 新增策略 sh600519）。",
+            toolCalls=[],
+            meta={"mode": "llm", "decision": "tool_calls_parse_failed", "raw": raw},
+        )
+
+    # final
+    reply = parse_final_reply_from_llm_response(raw)
+
+    # 写入记忆：final 才写 assistant
+    if user_id:
+        await memory.append(user_id, {"role": "assistant", "content": reply})
+
+    return AgentChatResponse(reply=reply, toolCalls=[], meta={"mode": "llm", "decision": "final"})
 
 
 if __name__ == "__main__":

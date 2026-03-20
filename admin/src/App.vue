@@ -43,6 +43,9 @@
       </el-main>
     </el-container>
   </el-container>
+
+  <!-- 全局悬浮 AI 聊天窗口（登录页不显示） -->
+  <AgentChatFloat v-if="!isAuthPage" />
 </template>
 
 <script setup lang="ts">
@@ -51,6 +54,7 @@ import { useRoute, useRouter } from 'vue-router';
 import { api, clearAuthToken } from './api';
 import { ElMessageBox } from 'element-plus';
 import { Monitor, Setting, Document, Bell, Files } from '@element-plus/icons-vue';
+import AgentChatFloat from './components/AgentChatFloat.vue';
 
 const route = useRoute();
 const router = useRouter();

@@ -157,5 +157,19 @@ export const openapiDoc = {
         responses: { '200': { description: 'OK' } },
       },
     },
+    '/api/agent/chat': {
+      // body 传 { "message": "你好" }
+      post: {
+        summary: 'Send chat message to agent',
+        headers: {
+          authorization: { schema: { type: 'string' } },
+        },
+        requestBody: {
+          required: true,
+          content: { 'application/json': { schema: { type: 'object' } } },
+        },
+        responses: { '200': { description: 'OK' } },
+      },
+    }
   },
 } as const;
