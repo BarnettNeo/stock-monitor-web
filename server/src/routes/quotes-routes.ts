@@ -28,7 +28,19 @@ export function registerQuoteRoutes(app: Express): void {
 
     try {
       const prices = await fetchKLineData(symbol, scale, datalen);
-      const items = prices.map((p) => ({ time: p.time, close: p.close }));
+      const items = prices.map((p: any) => ({
+        time: p.time,
+        open: p.open,
+        high: p.high,
+        low: p.low,
+        close: p.close,
+        volume: p.volume,
+        percent: p.percent,
+        turnover: p.turnoverrate,
+        amplitude: ((p.high - p.low) / p.preclose) * 100,
+        change: p.change,
+        preclose: p.preclose,
+      }));
       res.json({
         serverTime: formatDate(new Date()),
         symbol,

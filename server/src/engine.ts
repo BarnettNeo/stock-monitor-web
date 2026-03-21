@@ -174,9 +174,14 @@ async function fetchHistoryCloses(code: string, period: string = '1'): Promise<n
 }
 
 // 获取最近价格数据的内部实现函数
-export async function fetchKLineData(code: string, scale: string = '1', datalen: number = 240): Promise<PriceData[]> {
+export async function fetchKLineData(
+  code: string,
+  scale: string = '1',
+  datalen: number = 240,
+): Promise<PriceData[]> {
   const safeLen = Math.max(1, Math.min(500, Number(datalen) || 240));
-  const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${code}&scale=${scale}&datalen=${safeLen}`;
+  // 多取一个数据点，用于计算第一个点的 preclose
+  const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${code}&scale=${scale}&datalen=${safeLen + 1}`;
   const response = await axios.get(url, {
     timeout: 5000,
     headers: {
@@ -186,10 +191,12 @@ export async function fetchKLineData(code: string, scale: string = '1', datalen:
   });
 
   const klines = response.data;
-  if (!Array.isArray(klines) || klines.length === 0) return [];
+  if (!Array.isArray(klines) || klines.length < 2) return [];
 
   const prices: PriceData[] = klines
-    .map((k: any) => {
+    .map((k: any, index: number, arr: any[]) => {
+      if (index === 0) return null; // 跳过第一个（最旧的）数据点，它仅用于计算
+
       const open = parseFloat(k.open);
       const high = parseFloat(k.high);
       const low = parseFloat(k.low);
@@ -198,6 +205,12 @@ export async function fetchKLineData(code: string, scale: string = '1', datalen:
 
       if (isNaN(open) || isNaN(high) || isNaN(low) || isNaN(close)) return null;
 
+      const prev_k = arr[index - 1];
+      const preclose = parseFloat(prev_k.close);
+
+      const change = close - preclose;
+      const percent = preclose !== 0 ? (change / preclose) * 100 : 0;
+      const turnoverrate = k.turnoverrate ? parseFloat(k.turnoverrate) : undefined;
       return {
         open,
         high,
@@ -205,6 +218,10 @@ export async function fetchKLineData(code: string, scale: string = '1', datalen:
         close,
         volume: isNaN(volume) ? 0 : volume,
         time: k.day || k.date || '',
+        preclose,
+        change,
+        percent,
+        turnoverrate,
       } as PriceData;
     })
     .filter((p: PriceData | null): p is PriceData => p !== null);

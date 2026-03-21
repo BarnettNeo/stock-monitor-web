@@ -67,7 +67,7 @@
       <!-- 重点关注股票卡片 -->
       <div class="panel p-3 mt-3">
         <div class="flex items-center gap-3 mb-2">
-          <div class="panel-title mb-0">重点关注股票</div>
+          <div class="panel-title mb-0">重点关注股票K线</div>
           <el-select
             v-model="focusSymbol"
             placeholder="请选择股票"
@@ -151,8 +151,8 @@ import { ElMessage } from 'element-plus';
 import { api } from '../api';
 import type { HotMoverItem, ScreenOverview, ScreenLatestTrigger, ScreenTrendPoint, WatchItem, ScreenKpis } from '../api/dashboard';
 import { getHotMovers, getScreenOverview } from '../api/dashboard';
-import type { KlineCloseItem } from '../api/quotes';
-import { getKlineCloseSeries } from '../api/quotes';
+import type { KlineItem } from '../api/quotes';
+import { getKlineSeries } from '../api/quotes';
 import { ensureChart, setLineChart } from '../utils/charts';
 import { Setting } from '@element-plus/icons-vue';
 
@@ -210,11 +210,15 @@ const pendingFeedQueue = ref<ScreenLatestTrigger[]>([]);
 
 const focusSymbol = ref<string>('');
 const focusLoading = ref(false);
-const focusSeries = ref<KlineCloseItem[]>([]);
+const focusSeries = ref<KlineItem[]>([]);
 
 const focusSymbolOptions = computed(() => {
   const fromWatch = Array.isArray(data.value?.watchlist) ? data.value!.watchlist : [];
   return fromWatch;
+});
+
+const focusStock = computed(() => {
+  return focusSymbolOptions.value.find((s) => s.code === focusSymbol.value);
 });
 
 const hotLoading = ref(false);
@@ -354,9 +358,9 @@ function renderTrend(): void {
   const points = data.value?.todayTrend || [];
   setLineChart(chart, {
     x: points.map((p) => p.time),
-    y: points.map((p) => p.count),
-    color: '#60a5fa',
-    areaOpacity: 0.15,
+    series: [
+      { name: '触发次数', y: points.map((p) => p.count), color: '#60a5fa' },
+    ],
     grid: { left: 40, right: 20, top: 20, bottom: 20 },
   });
 }
@@ -403,7 +407,6 @@ function renderMiniKline(): void {
 }
 
 function renderFocusChart(): void {
-  // 重点关注股票：展示近一段时间收盘价走势（用于快速观察强弱与波动）。
   const chart = ensureChart(focusChartEl.value, focusChart);
   if (!chart) return;
   focusChart = chart;
@@ -413,19 +416,74 @@ function renderFocusChart(): void {
     if (t.includes(' ')) return t.split(' ')[0];
     return t;
   });
+
+  const tooltip: echarts.TooltipComponentOption = {
+    trigger: 'axis',
+    formatter: (params: any) => {
+      const dataIndex = params[0].dataIndex;
+      const data = items[dataIndex];
+      if (!data) return '';
+
+      const stockName = focusStock.value?.name || '';
+      const date = new Date(data.time).toLocaleDateString('zh-CN', { year: 'numeric', month: '2-digit', day: '2-digit' });
+      const dayOfWeek = ['日', '一', '二', '三', '四', '五', '六'][new Date(data.time).getDay()];
+
+      const formatPrice = (label: string, price: number, percent: number) => {
+        const color = percent > 0 ? '#ef4444' : percent < 0 ? '#22c55e' : '#9ca3af';
+        const sign = percent > 0 ? '+' : '';
+        return `${label}: <span style="color: ${color}">${price.toFixed(2)} (${sign}${percent.toFixed(2)}%)</span>`;
+      };
+
+      const openPercent = data.preclose ? ((data.open - data.preclose) / data.preclose) * 100 : 0;
+      const highPercent = data.preclose ? ((data.high - data.preclose) / data.preclose) * 100 : 0;
+      const lowPercent = data.preclose ? ((data.low - data.preclose) / data.preclose) * 100 : 0;
+      const closePercent = data.percent || 0;
+
+      let html = `<div class="text-left">`;
+      html += `<b>${stockName}</b><br/>`;
+      html += `${date} 周${dayOfWeek}<br/>`;
+      html += `--------------------<br/>`;
+      html += `${formatPrice('开盘', data.open, openPercent)}<br/>`;
+      html += `${formatPrice('最高', data.high, highPercent)}<br/>`;
+      html += `${formatPrice('最低', data.low, lowPercent)}<br/>`;
+      html += `${formatPrice('收盘', data.close, closePercent)}<br/>`;
+      html += `涨跌: <span style="color: ${data.change && data.change > 0 ? '#ef4444' : (data.change && data.change < 0 ? '#22c55e' : '#9ca3af')}">${typeof data.change === 'number' ? data.change.toFixed(2) : '--'} (${typeof closePercent === 'number' ? closePercent.toFixed(2) : '--'}%)</span><br/>`;
+      html += `成交: ${(data.volume / 10000).toFixed(2)}万手<br/>`;
+      html += `换手: ${typeof data.turnover === 'number' ? data.turnover.toFixed(2) + '%' : '--'}<br/>`;
+      html += `振幅: ${typeof data.amplitude === 'number' ? data.amplitude.toFixed(2) + '%' : '--'}<br/>`;
+      html += `</div>`;
+      return html;
+    },
+  };
+
+  const legend = {
+    data: ['收盘', '开盘', '最高', '最低'],
+    textStyle: {
+      color: '#ccc',
+    },
+    top: 0,
+    right: 20,
+  };
+
   setLineChart(chart, {
     x,
-    y: items.map((p) => p.close),
-    color: '#60a5fa',
-    grid: { left: 40, right: 20, top: 20, bottom: 30 },
+    series: [
+      { name: '收盘', y: items.map((p) => p.close), color: '#60a5fa' },
+      { name: '开盘', y: items.map((p) => p.open), color: '#facc15' },
+      { name: '最高', y: items.map((p) => p.high), color: '#f87171' },
+      { name: '最低', y: items.map((p) => p.low), color: '#4ade80' },
+    ],
+    grid: { left: 40, right: 20, top: 40, bottom: 30 },
+    tooltip,
+    legend,
   });
 }
 
 async function loadFocusSeries(symbol: string): Promise<void> {
-  // 拉取“重点关注股票”的 K 线收盘价序列，并刷新图表。
+  // 拉取“重点关注股票”的 K 线序列，并刷新图表。
   focusLoading.value = true;
   try {
-    const res = await getKlineCloseSeries({ symbol, scale: '240', datalen: 60 });
+    const res = await getKlineSeries({ symbol, scale: '240', datalen: 60 });
     focusSeries.value = Array.isArray(res.items) ? res.items : [];
     await nextTick();
     renderFocusChart();
