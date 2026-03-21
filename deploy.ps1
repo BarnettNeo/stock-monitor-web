@@ -40,6 +40,13 @@ if (-not $SkipFrontendBuild) {
 Write-Host "== Upload frontend dist =="
 scp -r "$adminDistDir" "${remoteTarget}:${RemoteRoot}/admin/"
 
+Write-Host "== Upload backend .env file =="
+$prodEnvFile = Join-Path $projectRoot '.env.production'
+if (-not (Test-Path $prodEnvFile)) {
+  throw ".env.production file not found in project root. Please create it with production database credentials."
+}
+scp "$prodEnvFile" "${remoteTarget}:${RemoteRoot}/.env"
+
 Write-Host "== Upload backend (exclude node_modules) =="
 $tempTarBackend = [System.IO.Path]::GetTempFileName() + ".tar.gz"
 
