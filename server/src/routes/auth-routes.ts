@@ -2,7 +2,7 @@ import type { Express, Request, Response } from 'express';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 
-import { getDb, persist } from '../db';
+import { execute, queryOne } from '../db';
 import { AUTH_ADMIN_USER_ID, pbkdf2Hash, signToken, requireAuth } from '../auth';
 import { handleApiError, nowIso } from '../utils';
 
@@ -30,15 +30,11 @@ export function registerAuthRoutes(app: Express): void {
       const salt = crypto.randomBytes(16).toString('hex');
       const hash = pbkdf2Hash(parsed.password, salt);
       const ts = nowIso();
-      const db = await getDb();
-
-      db.run(
+      await execute(
         `INSERT INTO users (id,username,password_salt,password_hash,role,created_at,updated_at)
          VALUES (?,?,?,?,?,?,?)`,
         [userId, username, salt, hash, role, ts, ts],
       );
-
-      persist();
       res.json({ ok: true });
     } catch (error: any) {
       const msg = error?.message?.includes('UNIQUE') ? '用户名已存在' : handleApiError(error).message;
@@ -50,12 +46,9 @@ export function registerAuthRoutes(app: Express): void {
     try {
       const parsed = LoginSchema.parse(req.body);
       const username = parsed.username.trim();
-      const db = await getDb();
-
-      const stmt = db.prepare('SELECT * FROM users WHERE username = ?');
-      stmt.bind([username]);
-      const row = stmt.step() ? stmt.getAsObject() : null;
-      stmt.free();
+      const row = await queryOne<any>('SELECT * FROM users WHERE username = ? LIMIT 1', [
+        username,
+      ]);
       if (!row) return res.status(400).json({ message: '用户名或密码错误' });
 
       const expected = String((row as any).password_hash);

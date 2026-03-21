@@ -6,8 +6,15 @@ import { z } from 'zod';
 
 import type { AuthedUser } from '../auth';
 import { requireAuth } from '../auth';
-import { getDb, persist } from '../db';
+import { execute, query, queryOne } from '../db';
 import { rowToStrategy } from '../mappers';
+import {
+  addClause,
+  addDatePrefixRange,
+  addLikeAny,
+  createWhereBuilder,
+  toWhereSql,
+} from '../sql-utils';
 import { boolToInt, nowIso } from '../utils';
 import { fetchStockDataBatch } from '../engine';
 
@@ -158,31 +165,23 @@ function calcDateRangeForReport(reportType: 'daily' | 'weekly' | 'monthly'): { s
 async function toolListStrategies(user: AuthedUser, args: unknown): Promise<any> {
   const parsed = ListStrategiesArgsSchema.parse(args || {});
   const limit = parsed.limit ?? 20;
-  const db = await getDb();
-
   // 更稳妥：非管理员只返回自己的策略，避免数据泄露
-  const where: string[] = [];
-  const params: any[] = [];
+  const where = createWhereBuilder();
   if (user.role !== 'admin') {
-    where.push('user_id = ?');
-    params.push(user.userId);
+    addClause(where, 'user_id = ?', user.userId);
   }
   if (parsed.name) {
-    where.push('name LIKE ?');
-    params.push(`%${parsed.name}%`);
+    addClause(where, 'name LIKE ?', `%${parsed.name}%`);
   }
   if (parsed.enabledOnly) {
-    where.push('enabled = 1');
+    addClause(where, 'enabled = 1');
   }
-
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
-  const stmt = db.prepare(`SELECT * FROM strategies ${whereSql} ORDER BY updated_at DESC LIMIT ${limit}`);
-  stmt.bind(params);
-  const items: any[] = [];
-  while (stmt.step()) {
-    items.push(rowToStrategy(stmt.getAsObject()));
-  }
-  stmt.free();
+  const { whereSql, params } = toWhereSql(where);
+  const rows = await query<any>(
+    `SELECT * FROM strategies ${whereSql} ORDER BY updated_at DESC LIMIT ?`,
+    [...params, limit],
+  );
+  const items = rows.map((row) => rowToStrategy(row));
 
   // 返回字段尽量精简，避免 prompt 过大
   return {
@@ -219,13 +218,11 @@ async function toolCreateStrategy(user: AuthedUser, args: unknown): Promise<any>
   // DB schema: price_alert_percent NOT NULL
   const priceAlertPercent = typeof parsed.priceAlertPercent === 'number' ? parsed.priceAlertPercent : 2;
 
-  const db = await getDb();
-
   const subscriptionIdsJson = parsed.subscriptionIds && parsed.subscriptionIds.length > 0
     ? JSON.stringify(parsed.subscriptionIds)
     : null;
 
-  db.run(
+  await execute(
     `INSERT INTO strategies (
       id,user_id,name,enabled,symbols,market_time_only,alert_mode,target_price_up,target_price_down,interval_ms,cooldown_minutes,price_alert_percent,
       enable_macd_golden_cross,enable_rsi_oversold,enable_rsi_overbought,enable_moving_averages,enable_pattern_signal,
@@ -255,8 +252,6 @@ async function toolCreateStrategy(user: AuthedUser, args: unknown): Promise<any>
     ],
   );
 
-  persist();
-
   return {
     id,
     name: parsed.name,
@@ -271,14 +266,12 @@ async function toolCreateStrategy(user: AuthedUser, args: unknown): Promise<any>
 // 删除策略工具
 async function toolDeleteStrategy(user: AuthedUser, args: unknown): Promise<any> {
   const parsed = DeleteStrategyArgsSchema.parse(args || {});
-  const db = await getDb();
 
   // 优先按 strategyId 精确删除
   if (parsed.strategyId) {
-    const stmtOwner = db.prepare('SELECT * FROM strategies WHERE id = ?');
-    stmtOwner.bind([parsed.strategyId]);
-    const row = stmtOwner.step() ? stmtOwner.getAsObject() : null;
-    stmtOwner.free();
+    const row = await queryOne<any>('SELECT * FROM strategies WHERE id = ? LIMIT 1', [
+      parsed.strategyId,
+    ]);
     if (!row) {
       throw new Error('策略不存在');
     }
@@ -287,8 +280,7 @@ async function toolDeleteStrategy(user: AuthedUser, args: unknown): Promise<any>
       throw new Error('无权限删除该策略');
     }
     const strategy = rowToStrategy(row);
-    db.run('DELETE FROM strategies WHERE id = ?', [parsed.strategyId]);
-    persist();
+    await execute('DELETE FROM strategies WHERE id = ?', [parsed.strategyId]);
     return {
       id: strategy.id,
       name: strategy.name,
@@ -302,39 +294,32 @@ async function toolDeleteStrategy(user: AuthedUser, args: unknown): Promise<any>
   }
 
   // 兜底：根据 symbols/name 做宽松匹配，最多删除一条，避免误删
-  const where: string[] = [];
-  const params: any[] = [];
+  const where = createWhereBuilder();
   if (user.role !== 'admin') {
-    where.push('user_id = ?');
-    params.push(user.userId);
+    addClause(where, 'user_id = ?', user.userId);
   }
   if (parsed.symbols) {
     const symbolsStr = Array.isArray(parsed.symbols)
       ? parsed.symbols.join(',')
       : String(parsed.symbols);
-    where.push('symbols LIKE ?');
-    params.push(`%${symbolsStr.split(',')[0].trim()}%`);
+    addClause(where, 'symbols LIKE ?', `%${symbolsStr.split(',')[0].trim()}%`);
   }
   if (parsed.name) {
-    where.push('name LIKE ?');
-    params.push(`%${parsed.name}%`);
+    addClause(where, 'name LIKE ?', `%${parsed.name}%`);
   }
-  const whereSql = where.length ? `WHERE ${where.join(' AND ')}` : '';
+  const { whereSql, params } = toWhereSql(where);
 
-  const stmt = db.prepare(
+  const row = await queryOne<any>(
     `SELECT * FROM strategies ${whereSql} ORDER BY updated_at DESC LIMIT 1`,
+    params,
   );
-  stmt.bind(params);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
 
   if (!row) {
     throw new Error('未找到可删除的策略，请提供更准确的策略ID或名称');
   }
 
   const strategy = rowToStrategy(row);
-  db.run('DELETE FROM strategies WHERE id = ?', [strategy.id]);
-  persist();
+  await execute('DELETE FROM strategies WHERE id = ?', [strategy.id]);
   return {
     id: strategy.id,
     name: strategy.name,
@@ -345,15 +330,11 @@ async function toolDeleteStrategy(user: AuthedUser, args: unknown): Promise<any>
 // 查询触发记录工具（简版统计）
 async function toolQueryTriggers(user: AuthedUser, args: unknown): Promise<any> {
   const parsed = QueryTriggersArgsSchema.parse(args || {});
-  const db = await getDb();
-
-  const params: any[] = [];
-  let whereSql = 'WHERE 1=1';
+  const where = createWhereBuilder();
 
   // 仅按 userId 过滤触发日志（如果存在），避免跨用户泄露
   if (user.role !== 'admin') {
-    whereSql += ' AND user_id = ?';
-    params.push(user.userId);
+    addClause(where, 'user_id = ?', user.userId);
   }
 
   // dateRange -> startDate/endDate（基于 created_at 日期前缀）
@@ -375,14 +356,7 @@ async function toolQueryTriggers(user: AuthedUser, args: unknown): Promise<any> 
     startDate = toDateStr(d);
     endDate = toDateStr(today);
   }
-  if (startDate) {
-    whereSql += ' AND substr(created_at,1,10) >= ?';
-    params.push(startDate);
-  }
-  if (endDate) {
-    whereSql += ' AND substr(created_at,1,10) <= ?';
-    params.push(endDate);
-  }
+  addDatePrefixRange(where, 'created_at', startDate, endDate);
 
   // symbols 过滤（支持单个或多个，模糊匹配）
   if (parsed.symbols) {
@@ -393,24 +367,18 @@ async function toolQueryTriggers(user: AuthedUser, args: unknown): Promise<any> 
       .map((s) => String(s).trim())
       .filter(Boolean);
     if (trimmed.length > 0) {
-      whereSql += ` AND (${trimmed
-        .map(() => 'symbol LIKE ?')
-        .join(' OR ')})`;
-      for (const s of trimmed) {
-        params.push(`%${s}%`);
-      }
+      addLikeAny(where, 'symbol', trimmed);
     }
   }
+  const { whereSql, params } = toWhereSql(where);
 
   const limit = parsed.limit ?? 20;
-  const stmt = db.prepare(
+  const rows = await query<any>(
     `SELECT * FROM trigger_logs ${whereSql} ORDER BY created_at DESC LIMIT ?`,
+    [...params, limit],
   );
-  stmt.bind([...params, limit]);
-
   const items: any[] = [];
-  while (stmt.step()) {
-    const row = stmt.getAsObject() as any;
+  for (const row of rows) {
     let snapshot: any = null;
     try {
       snapshot = JSON.parse(row.snapshot_json);
@@ -431,7 +399,6 @@ async function toolQueryTriggers(user: AuthedUser, args: unknown): Promise<any> 
       sendError: row.send_error || undefined,
     });
   }
-  stmt.free();
 
   return {
     count: items.length,
@@ -446,7 +413,6 @@ async function toolQueryTriggers(user: AuthedUser, args: unknown): Promise<any> 
 // 获取诊断信息工具
 async function toolGetDiagnostic(user: AuthedUser, args: unknown): Promise<any> {
   const parsed = GetDiagnosticArgsSchema.parse(args || {});
-  const db = await getDb();
 
   const symbol = normalizeSinaCodeForQuery(parsed.symbol);
 
@@ -463,38 +429,25 @@ async function toolGetDiagnostic(user: AuthedUser, args: unknown): Promise<any> 
   }
   const endDate = dateStr(now);
 
-  const params: any[] = [];
-  let whereSql = 'WHERE 1=1';
-  whereSql += ' AND symbol = ?';
-  params.push(symbol);
+  const where = createWhereBuilder();
+  addClause(where, 'symbol = ?', symbol);
 
   if (user.role !== 'admin') {
-    whereSql += ' AND user_id = ?';
-    params.push(user.userId);
+    addClause(where, 'user_id = ?', user.userId);
   }
+  addDatePrefixRange(where, 'created_at', startDate, endDate);
+  const { whereSql, params } = toWhereSql(where);
 
-  whereSql += ' AND substr(created_at,1,10) >= ? AND substr(created_at,1,10) <= ?';
-  params.push(startDate, endDate);
-
-  const countStmt = db.prepare(`SELECT COUNT(*) as cnt FROM trigger_logs ${whereSql}`);
-  countStmt.bind(params);
-  let total = 0;
-  if (countStmt.step()) {
-    const row = countStmt.getAsObject() as any;
-    total = Number(row.cnt || 0);
-  }
-  countStmt.free();
-
-  const listStmt = db.prepare(
-    `SELECT * FROM trigger_logs ${whereSql} ORDER BY created_at DESC LIMIT 10`,
+  const countRow = await queryOne<any>(
+    `SELECT COUNT(*) as cnt FROM trigger_logs ${whereSql}`,
+    params,
   );
-  listStmt.bind(params);
+  const total = Number(countRow?.cnt || 0);
 
-  const rows: any[] = [];
-  while (listStmt.step()) {
-    rows.push(listStmt.getAsObject());
-  }
-  listStmt.free();
+  const rows = await query<any>(
+    `SELECT * FROM trigger_logs ${whereSql} ORDER BY created_at DESC LIMIT 10`,
+    params,
+  );
 
   const reasonCounts: Record<string, number> = {};
   for (const r of rows) {
@@ -553,7 +506,6 @@ async function toolGetDiagnostic(user: AuthedUser, args: unknown): Promise<any> 
 // 更新订阅工具
 async function toolUpdateSubscription(user: AuthedUser, args: unknown): Promise<any> {
   const parsed = UpdateSubscriptionArgsSchema.parse(args || {});
-  const db = await getDb();
 
   if (parsed.type === 'email') {
     throw new Error('email 通知暂未实现');
@@ -571,27 +523,24 @@ async function toolUpdateSubscription(user: AuthedUser, args: unknown): Promise<
   const wantEnabled = boolToInt(Boolean(parsed.enabled));
 
   // 按 (user_id,type,webhook_url) 找已有记录；没有则创建
-  const stmt = db.prepare(
+  const row = await queryOne<any>(
     `SELECT * FROM subscriptions WHERE user_id = ? AND type = ? AND webhook_url = ? ORDER BY updated_at DESC LIMIT 1`,
+    [user.userId, nodeType, endpoint],
   );
-  stmt.bind([user.userId, nodeType, endpoint]);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
 
   const ts = nowIso();
   if (row) {
-    db.run(
+    await execute(
       `UPDATE subscriptions SET
         name=?, enabled=?, webhook_url=?, keyword=?, updated_at=?
        WHERE id=?`,
       [wantName, wantEnabled, endpoint, null, ts, row.id],
     );
-    persist();
     return { type: parsed.type, status: parsed.enabled ? '启用' : '停用' };
   }
 
   const id = crypto.randomUUID();
-  db.run(
+  await execute(
     `INSERT INTO subscriptions (
       id,user_id,name,type,enabled,webhook_url,keyword,
       wecom_app_corp_id,wecom_app_corp_secret,wecom_app_agent_id,wecom_app_to_user,wecom_app_to_party,wecom_app_to_tag,
@@ -615,7 +564,6 @@ async function toolUpdateSubscription(user: AuthedUser, args: unknown): Promise<
       ts,
     ],
   );
-  persist();
   return { type: parsed.type, status: parsed.enabled ? '启用' : '停用' };
 }
 
@@ -660,8 +608,6 @@ async function toolGenerateReport(user: AuthedUser, args: unknown): Promise<any>
   const parsed = GenerateReportArgsSchema.parse(args || {});
   void parsed.format; // 当前只返回结构化摘要，由 Python tools formatter 渲染
 
-  const db = await getDb();
-
   const { startDate, endDate } = calcDateRangeForReport(parsed.reportType);
 
   // 策略数量（统计启用中的策略）
@@ -671,41 +617,30 @@ async function toolGenerateReport(user: AuthedUser, args: unknown): Promise<any>
     stratWhere += ' AND user_id = ?';
     stratParams.push(user.userId);
   }
-  const stratStmt = db.prepare(`SELECT COUNT(*) as cnt FROM strategies ${stratWhere}`);
-  stratStmt.bind(stratParams);
-  let strategyCount = 0;
-  if (stratStmt.step()) {
-    const row = stratStmt.getAsObject() as any;
-    strategyCount = Number(row.cnt || 0);
-  }
-  stratStmt.free();
+  const stratRow = await queryOne<any>(
+    `SELECT COUNT(*) as cnt FROM strategies ${stratWhere}`,
+    stratParams,
+  );
+  const strategyCount = Number(stratRow?.cnt || 0);
 
   // 触发数量与热门 symbol
-  let trigWhere = `WHERE substr(created_at,1,10) >= ? AND substr(created_at,1,10) <= ?`;
-  const trigParams: any[] = [startDate, endDate];
+  const trigWhereBuilder = createWhereBuilder();
+  addDatePrefixRange(trigWhereBuilder, 'created_at', startDate, endDate);
   if (user.role !== 'admin') {
-    trigWhere += ' AND user_id = ?';
-    trigParams.push(user.userId);
+    addClause(trigWhereBuilder, 'user_id = ?', user.userId);
   }
+  const { whereSql: trigWhere, params: trigParams } = toWhereSql(trigWhereBuilder);
 
-  const trigCountStmt = db.prepare(`SELECT COUNT(*) as cnt FROM trigger_logs ${trigWhere}`);
-  trigCountStmt.bind(trigParams);
-  let triggerCount = 0;
-  if (trigCountStmt.step()) {
-    const row = trigCountStmt.getAsObject() as any;
-    triggerCount = Number(row.cnt || 0);
-  }
-  trigCountStmt.free();
-
-  const topSymbolsStmt = db.prepare(
-    `SELECT symbol, COUNT(*) as cnt FROM trigger_logs ${trigWhere} GROUP BY symbol ORDER BY cnt DESC LIMIT 5`,
+  const trigCountRow = await queryOne<any>(
+    `SELECT COUNT(*) as cnt FROM trigger_logs ${trigWhere}`,
+    trigParams,
   );
-  topSymbolsStmt.bind(trigParams);
-  const topSymbols: any[] = [];
-  while (topSymbolsStmt.step()) {
-    topSymbols.push(topSymbolsStmt.getAsObject());
-  }
-  topSymbolsStmt.free();
+  const triggerCount = Number(trigCountRow?.cnt || 0);
+
+  const topSymbols = await query<any>(
+    `SELECT symbol, COUNT(*) as cnt FROM trigger_logs ${trigWhere} GROUP BY symbol ORDER BY cnt DESC LIMIT 5`,
+    trigParams,
+  );
 
   return {
     reportType: parsed.reportType,
@@ -792,6 +727,7 @@ export function registerAgentRoutes(app: Express): void {
 
     try {
       for (let step = 0; step < maxSteps; step++) {
+        // 由上游 agent 决定是否继续调用工具；这里作为受控执行器仅返回工具结果。
         const r = await axios.post(
           `${baseUrl}/agent/chat`,
           {

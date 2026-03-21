@@ -1,8 +1,16 @@
 import type { Express, Request, Response } from 'express';
 
-import { getDb } from '../db';
+import { query, queryOne } from '../db';
 import { requireAuth } from '../auth';
 import { fetchRecentPriceData, calculateIndicatorSnapshot } from '../engine';
+import {
+  addClause,
+  addDatePrefixRange,
+  createWhereBuilder,
+  normalizePagination,
+  queryPaged,
+  toWhereSql,
+} from '../sql-utils';
 import { formatDate } from '../utils';
 
 // 触发日志查询 API（支持分页与查询参数）
@@ -11,66 +19,42 @@ export function registerTriggerLogRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    const page = Math.max(1, Number((req.query.page as string) || '1') || 1);
-    const rawPageSize = Number((req.query.pageSize as string) || '20') || 20;
-    const pageSize = Math.min(Math.max(rawPageSize, 1), 100);
+    const { page, pageSize, offset } = normalizePagination(req.query.page, req.query.pageSize);
 
     const symbol = typeof req.query.symbol === 'string' ? req.query.symbol.trim() : '';
     const startDate = typeof req.query.startDate === 'string' ? req.query.startDate.trim() : '';
     const endDate = typeof req.query.endDate === 'string' ? req.query.endDate.trim() : '';
     const type = typeof req.query.type === 'string' ? req.query.type.trim() : '';
 
-    let whereSql = 'WHERE 1=1';
-    const params: any[] = [];
+    // 统一用 builder 维护 where + params，避免动态拼接时遗漏参数顺序。
+    const where = createWhereBuilder();
 
     if (symbol) {
-      whereSql += ' AND symbol LIKE ?';
-      params.push(`%${symbol}%`);
+      addClause(where, 'symbol LIKE ?', `%${symbol}%`);
     }
-    if (startDate) {
-      whereSql += ' AND substr(created_at,1,10) >= ?';
-      params.push(startDate);
-    }
-    if (endDate) {
-      whereSql += ' AND substr(created_at,1,10) <= ?';
-      params.push(endDate);
-    }
+    addDatePrefixRange(where, 'created_at', startDate, endDate);
 
     if (type === 'indicator') {
-      whereSql += ' AND snapshot_json LIKE ?';
-      params.push('%"indicator":%');
+      addClause(where, 'snapshot_json LIKE ?', '%"indicator":%');
     } else if (type === 'pattern') {
-      whereSql += ' AND snapshot_json LIKE ?';
-      params.push('%"pattern":{"signal"%');
+      addClause(where, 'snapshot_json LIKE ?', '%"pattern":{"signal"%');
     } else if (type === 'price') {
-      whereSql +=
-        ' AND snapshot_json LIKE ? AND snapshot_json NOT LIKE ? AND snapshot_json NOT LIKE ?';
-      params.push('%"priceAlertPercent"%', '%"indicator":%', '%"pattern":{"signal"%');
+      addClause(where, 'snapshot_json LIKE ?', '%"priceAlertPercent"%');
+      addClause(where, 'snapshot_json NOT LIKE ?', '%"indicator":%');
+      addClause(where, 'snapshot_json NOT LIKE ?', '%"pattern":{"signal"%');
     }
+    const { whereSql, params } = toWhereSql(where);
 
-    const db = await getDb();
-
-    const offset = (page - 1) * pageSize;
-
-    const countStmt = db.prepare(`SELECT COUNT(*) as cnt FROM trigger_logs ${whereSql}`);
-    countStmt.bind(params);
-    let total = 0;
-    if (countStmt.step()) {
-      const row = countStmt.getAsObject() as any;
-      total = Number(row.cnt || 0);
-    }
-    countStmt.free();
-
-    const listStmt = db.prepare(
-      `SELECT * FROM trigger_logs ${whereSql} ORDER BY created_at DESC LIMIT ? OFFSET ?`,
-    );
-    listStmt.bind([...params, pageSize, offset]);
-
-    const rows: any[] = [];
-    while (listStmt.step()) {
-      rows.push(listStmt.getAsObject());
-    }
-    listStmt.free();
+    const { total, rows } = await queryPaged<any>({
+      baseFromSql: 'FROM trigger_logs',
+      whereSql,
+      params,
+      orderBySql: 'ORDER BY created_at DESC',
+      pageSize,
+      offset,
+      queryOne,
+      query,
+    });
 
     const items = rows.map((row: any) => {
       const snapshot = JSON.parse(row.snapshot_json);
@@ -96,14 +80,9 @@ export function registerTriggerLogRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    const db = await getDb();
-    const stmt = db.prepare('SELECT * FROM trigger_logs WHERE id = ?');
-    stmt.bind([req.params.id]);
-    let row: any | null = null;
-    if (stmt.step()) {
-      row = stmt.getAsObject();
-    }
-    stmt.free();
+    const row = await queryOne<any>('SELECT * FROM trigger_logs WHERE id = ? LIMIT 1', [
+      req.params.id,
+    ]);
 
     if (!row) {
       res.status(404).json({ message: 'Not found' });

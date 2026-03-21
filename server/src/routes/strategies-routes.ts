@@ -2,11 +2,12 @@ import type { Express, Request, Response } from 'express';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 
-import { getDb, persist } from '../db';
+import { execute, query, queryOne } from '../db';
 import { requireAuth } from '../auth';
 import { boolToInt, handleApiError, nowIso } from '../utils';
 import { rowToStrategy } from '../mappers';
 import { fetchStockDataBatch } from '../engine';
+import { addClause, createWhereBuilder, toWhereSql } from '../sql-utils';
 
 // 策略管理 API
 // - 列表支持 name/username 模糊查询
@@ -33,19 +34,17 @@ const StrategyInputSchema = z.object({
   enablePatternSignal: z.boolean().default(false),
 });
 
-function validateSubscriptionOwnership(
-  db: any,
+async function validateSubscriptionOwnership(
   user: { userId: string; role: 'admin' | 'user' },
   subscriptionIds: string[] | undefined,
-): { ok: true } | { ok: false; status: number; message: string } {
+): Promise<{ ok: true } | { ok: false; status: number; message: string }> {
   if (!subscriptionIds || subscriptionIds.length === 0) return { ok: true };
   if (user.role === 'admin') return { ok: true };
 
   for (const subId of subscriptionIds) {
-    const stmt = db.prepare('SELECT user_id FROM subscriptions WHERE id = ?');
-    stmt.bind([subId]);
-    const row = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
+    const row = await queryOne<any>('SELECT user_id FROM subscriptions WHERE id = ? LIMIT 1', [
+      subId,
+    ]);
 
     if (!row) return { ok: false, status: 400, message: '订阅不存在' };
     const ownerId = (row as any).user_id ? String((row as any).user_id) : '';
@@ -63,37 +62,27 @@ export function registerStrategyRoutes(app: Express): void {
     const qName = typeof req.query?.name === 'string' ? String(req.query.name).trim() : '';
     const qUsername = typeof req.query?.username === 'string' ? String(req.query.username).trim() : '';
 
-    const db = await getDb();
-
-    const where: string[] = [];
-    const params: any[] = [];
+    const where = createWhereBuilder();
     if (qName) {
-      where.push('s.name LIKE ?');
-      params.push(`%${qName}%`);
+      addClause(where, 's.name LIKE ?', `%${qName}%`);
     }
     if (qUsername) {
-      where.push('u.username LIKE ?');
-      params.push(`%${qUsername}%`);
+      addClause(where, 'u.username LIKE ?', `%${qUsername}%`);
     }
-    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const { whereSql, params } = toWhereSql(where);
 
-    const stmt = db.prepare(
+    const rows = await query<any>(
       `SELECT s.*, u.username AS created_by_username
        FROM strategies s
        LEFT JOIN users u ON u.id = s.user_id
        ${whereSql}
        ORDER BY s.updated_at DESC`,
+      params,
     );
-    stmt.bind(params);
-    const items: any[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      items.push({
-        ...rowToStrategy(row),
-        createdByUsername: (row as any).created_by_username || (row as any).user_id || null,
-      });
-    }
-    stmt.free();
+    const items: any[] = rows.map((row) => ({
+      ...rowToStrategy(row),
+      createdByUsername: (row as any).created_by_username || (row as any).user_id || null,
+    }));
 
     // 获取所有股票代码并查询名称
     const allSymbols = new Set<string>();
@@ -139,16 +128,14 @@ export function registerStrategyRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    const db = await getDb();
-    const stmt = db.prepare(
+    const row = await queryOne<any>(
       `SELECT s.*, u.username AS created_by_username
        FROM strategies s
        LEFT JOIN users u ON u.id = s.user_id
-       WHERE s.id = ?`,
+       WHERE s.id = ?
+       LIMIT 1`,
+      [req.params.id],
     );
-    stmt.bind([req.params.id]);
-    const row = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
     if (!row) return res.status(404).json({ error: 'Not found' });
     res.json({
       item: {
@@ -166,16 +153,14 @@ export function registerStrategyRoutes(app: Express): void {
       const parsed = StrategyInputSchema.parse(req.body);
       const id = crypto.randomUUID();
       const ts = nowIso();
-      const db = await getDb();
-
-      const subCheck = validateSubscriptionOwnership(db, user, parsed.subscriptionIds);
+      const subCheck = await validateSubscriptionOwnership(user, parsed.subscriptionIds);
       if (!subCheck.ok) return res.status(subCheck.status).json({ message: subCheck.message });
 
       const subscriptionIdsJson = parsed.subscriptionIds && parsed.subscriptionIds.length > 0
         ? JSON.stringify(parsed.subscriptionIds)
         : null;
 
-      db.run(
+      await execute(
         `INSERT INTO strategies (
           id,user_id,name,enabled,symbols,market_time_only,subscription_ids_json,alert_mode,target_price_up,target_price_down,interval_ms,cooldown_minutes,price_alert_percent,
           enable_macd_golden_cross,enable_rsi_oversold,enable_rsi_overbought,enable_moving_averages,enable_pattern_signal,
@@ -205,7 +190,6 @@ export function registerStrategyRoutes(app: Express): void {
         ],
       );
 
-      persist();
       res.json({ id });
     } catch (error: any) {
       const { status, message } = handleApiError(error);
@@ -220,26 +204,24 @@ export function registerStrategyRoutes(app: Express): void {
 
       const parsed = StrategyInputSchema.parse(req.body);
       const ts = nowIso();
-      const db = await getDb();
-
-      const stmtOwner = db.prepare('SELECT user_id FROM strategies WHERE id = ?');
-      stmtOwner.bind([req.params.id]);
-      const ownerRow = stmtOwner.step() ? stmtOwner.getAsObject() : null;
-      stmtOwner.free();
+      const ownerRow = await queryOne<any>(
+        'SELECT user_id FROM strategies WHERE id = ? LIMIT 1',
+        [req.params.id],
+      );
       if (!ownerRow) return res.status(404).json({ message: 'Not found' });
       const ownerId = (ownerRow as any).user_id ? String((ownerRow as any).user_id) : '';
       if (user.role !== 'admin' && ownerId !== user.userId) {
         return res.status(403).json({ message: 'Forbidden' });
       }
 
-      const subCheck = validateSubscriptionOwnership(db, user, parsed.subscriptionIds);
+      const subCheck = await validateSubscriptionOwnership(user, parsed.subscriptionIds);
       if (!subCheck.ok) return res.status(subCheck.status).json({ message: subCheck.message });
 
       const subscriptionIdsJson = parsed.subscriptionIds && parsed.subscriptionIds.length > 0
         ? JSON.stringify(parsed.subscriptionIds)
         : null;
 
-      db.run(
+      await execute(
         `UPDATE strategies SET
           user_id=?,name=?,enabled=?,symbols=?,market_time_only=?,alert_mode=?,target_price_up=?,target_price_down=?,interval_ms=?,cooldown_minutes=?,price_alert_percent=?,
           enable_macd_golden_cross=?,enable_rsi_oversold=?,enable_rsi_overbought=?,enable_moving_averages=?,enable_pattern_signal=?,
@@ -268,7 +250,6 @@ export function registerStrategyRoutes(app: Express): void {
         ],
       );
 
-      persist();
       res.json({ ok: true });
     } catch (error: any) {
       const { status, message } = handleApiError(error);
@@ -280,20 +261,16 @@ export function registerStrategyRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    const db = await getDb();
-
-    const stmtOwner = db.prepare('SELECT user_id FROM strategies WHERE id = ?');
-    stmtOwner.bind([req.params.id]);
-    const ownerRow = stmtOwner.step() ? stmtOwner.getAsObject() : null;
-    stmtOwner.free();
+    const ownerRow = await queryOne<any>('SELECT user_id FROM strategies WHERE id = ? LIMIT 1', [
+      req.params.id,
+    ]);
     if (!ownerRow) return res.status(404).json({ message: 'Not found' });
     const ownerId = (ownerRow as any).user_id ? String((ownerRow as any).user_id) : '';
     if (user.role !== 'admin' && ownerId !== user.userId) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    db.run('DELETE FROM strategies WHERE id = ?', [req.params.id]);
-    persist();
+    await execute('DELETE FROM strategies WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   });
 }

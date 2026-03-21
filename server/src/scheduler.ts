@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 
-import { getDb, persist } from './db';
+import { execute, query } from './db';
 import { runStrategyOnce, type Strategy } from './engine';
 import { notifyBySubscription, type Subscription as NotifySubscription } from './notify';
 import { buildNotifyPayload } from './message-templates';
@@ -19,21 +19,11 @@ function buildMarkdownFromEvent(ev: any): { title: string; markdown: string } {
 
 // 扫描一次：读取启用策略 -> 计算触发事件 -> 对订阅发送并落库 trigger_logs
 export async function scanOnce(): Promise<void> {
-  const db = await getDb();
-
-  const subsResult = db.exec('SELECT * FROM subscriptions WHERE enabled = 1');
-  const subRows = subsResult[0]?.values || [];
-  const subCols = subsResult[0]?.columns || [];
-  const allSubs = subRows
-    .map((v: any[]) => Object.fromEntries(v.map((x: any, i: number) => [subCols[i], x])))
+  const allSubs = (await query<any>('SELECT * FROM subscriptions WHERE enabled = 1'))
     .map(rowToSubscription) as NotifySubscription[];
   const subMap = new Map(allSubs.map((s) => [s.id, s]));
 
-  const strategyResult = db.exec('SELECT * FROM strategies WHERE enabled = 1');
-  const sRows = strategyResult[0]?.values || [];
-  const sCols = strategyResult[0]?.columns || [];
-  const strategies = sRows
-    .map((v: any[]) => Object.fromEntries(v.map((x: any, i: number) => [sCols[i], x])))
+  const strategies = (await query<any>('SELECT * FROM strategies WHERE enabled = 1'))
     .map((row: StrategyRow) => {
       const symbols = String(row.symbols)
         .split(',')
@@ -74,11 +64,12 @@ export async function scanOnce(): Promise<void> {
         const targets = subIds && subIds.length > 0 ? subIds.map((id) => subMap.get(id)).filter(Boolean) : [undefined];
 
         for (const sub of targets) {
+          // 每个订阅都单独落一条 trigger_log，便于回看不同渠道的发送结果。
           const payload = sub ? buildNotifyPayload(ev, sub.type) : buildMarkdownFromEvent(ev);
           const sendResult = sub ? await notifyBySubscription(sub, payload) : { ok: true };
 
           const id = crypto.randomUUID();
-          db.run(
+          await execute(
             `INSERT INTO trigger_logs (
               id,user_id,strategy_id,subscription_id,symbol,stock_name,reason,snapshot_json,send_status,send_error,created_at
             ) VALUES (?,?,?,?,?,?,?,?,?,?,?)`,
@@ -103,7 +94,6 @@ export async function scanOnce(): Promise<void> {
     }
   }
 
-  persist();
 }
 
 export async function startScheduler(): Promise<SchedulerHandle> {

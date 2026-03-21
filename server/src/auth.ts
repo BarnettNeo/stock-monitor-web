@@ -1,7 +1,7 @@
 import crypto from 'node:crypto';
 import type { Request, Response } from 'express';
 
-import { getDb } from './db';
+import { queryOne } from './db';
 
 export type AuthedUser = {
   userId: string;
@@ -76,11 +76,9 @@ export async function requireAuth(req: Request, res: Response): Promise<AuthedUs
     return null;
   }
 
-  const db = await getDb();
-  const stmt = db.prepare('SELECT * FROM users WHERE id = ?');
-  stmt.bind([String(payload.userId)]);
-  const row = stmt.step() ? stmt.getAsObject() : null;
-  stmt.free();
+  const row = await queryOne<any>('SELECT * FROM users WHERE id = ? LIMIT 1', [
+    String(payload.userId),
+  ]);
   if (!row) {
     res.status(401).json({ message: 'Unauthorized' });
     return null;

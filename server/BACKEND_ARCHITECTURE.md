@@ -15,7 +15,7 @@
 - 语言：TypeScript
 - Web 框架：Express
 - 文档：OpenAPI JSON + Swagger UI
-- 数据库：SQLite（使用 `sql.js` WASM 内存数据库 + 文件落盘持久化）
+- 数据库：MySQL（`mysql2/promise` 连接池；由 `server/src/db.ts` 统一提供 `query/queryOne/execute`）
 - 定时任务：Node.js `setInterval`
 - 推送渠道：钉钉机器人、企业微信机器人、企业微信应用（预留/支持）
 
@@ -70,7 +70,7 @@
 
 - `src/mappers.ts`
 
-职责：将 `sql.js` 返回的 row 对象转换为 API DTO。
+职责：将数据库查询返回的 row 对象转换为 API DTO（例如解析 `subscription_ids_json`、组织 `wecom_app_*` 字段等）。
 
 - `rowToStrategy(row)`：
   - 解析 `subscription_ids_json`
@@ -105,20 +105,26 @@
 - `src/routes/trigger-logs-routes.ts`
   - `GET /api/trigger-logs`：触发日志列表（最多 200 条）
 
+### 3.5.1 动态 SQL 构建辅助
+
+- `src/sql-utils.ts`
+  - 统一构建动态 `WHERE` 条件（避免重复的 `whereSql/params` 拼装）
+  - 统一分页 `COUNT + 列表` 查询模式，减少复制粘贴
+
 ### 3.6 数据库与迁移
 
 - `src/db.ts`
 
 职责：
 
-- 初始化 `sql.js` 数据库实例
-- 通过 `migrate(database)` 进行建表/增量迁移
-- 使用 `persist()` 将内存 DB `export()` 后写入 `server/data/db.sqlite`
+- 连接 MySQL，并通过 `CREATE TABLE IF NOT EXISTS` 自动建表
+- 统一对外提供 `query/queryOne/execute`，供路由层与 scheduler 执行参数化 SQL
+- 首次启动时：若检测到旧的 `server/data/db.sqlite` 历史文件，则通过 `sql.js` 进行一次性导入到 MySQL（由 `_meta/sqlite_import_v1_done` 标记幂等）
 
 关键点：
 
-- `sql.js` 是内存数据库：每次写入后需要 `persist()` 才能落盘
-- `getDb()` 初始化后会立即调用 `persist()`，确保 schema 写入文件
+- MySQL 由连接池维持并自动持久化，不需要类似 `persist()` 的导出落盘
+- `sql.js` 仅用于“迁移导入”：导入完成后不再参与常规读写
 
 ### 3.7 策略引擎
 
@@ -161,7 +167,7 @@
   - 对每个策略执行 `runStrategyOnce()`
   - 将事件分发到策略绑定的订阅（或无订阅时仅落库）
   - 每次推送/不推送都写入 `trigger_logs`
-  - 扫描完成后 `persist()` 落盘
+- 扫描完成后写入 MySQL（由数据库负责持久化）
 
 - `startScheduler()`：
   - 启动时先执行一次 `scanOnce()`
@@ -178,7 +184,7 @@
 5. 对每个事件：
    - 若策略绑定订阅：逐订阅发送 -> 逐条写入 `trigger_logs`
    - 若无绑定订阅：写入一条 `NO_SUBSCRIPTION` 状态的日志
-6. `persist()` 落盘
+6. 写入 MySQL（由数据库负责持久化）
 7. 管理后台通过 `/api/trigger-logs` 回看触发原因、快照与发送错误
 
 ### 4.2 用户鉴权与权限校验
@@ -190,50 +196,54 @@
    - `admin` 允许修改任何记录
    - `user` 仅允许修改 `user_id == 当前 userId` 的记录
 
-## 5. 数据库模型（SQLite）
+## 5. 数据库模型（MySQL）
 
-数据库文件：`server/data/db.sqlite`。
+连接信息：通过根目录 `.env` 的 `DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD` 连接 MySQL。
+
+> Windows 上若 `DB_HOST=localhost` 出现 `ECONNREFUSED ::1:3306`，请改用 `127.0.0.1`（或保持 localhost：代码会将 `localhost`/`::1` 规范为 `127.0.0.1`）。
+
+> 历史数据：如仍存在 `server/data/db.sqlite`，后端会在首次启动时导入到 MySQL。
 
 ### 5.1 users
 
-- `id` (TEXT, PK)：系统内部 userId（约定与 username 一致）
-- `username` (TEXT, UNIQUE)
-- `password_salt` (TEXT)
-- `password_hash` (TEXT)
-- `role` (TEXT)：`admin`/`user`
-- `created_at` / `updated_at` (TEXT)
+- `id` (VARCHAR, PK)：系统内部 userId（约定与 username 一致）
+- `username` (VARCHAR, UNIQUE)
+- `password_salt` (VARCHAR)
+- `password_hash` (VARCHAR)
+- `role` (VARCHAR)：`admin`/`user`
+- `created_at` / `updated_at` (VARCHAR)：ISO 字符串
 
 ### 5.2 strategies
 
-- `id` (TEXT, PK)
-- `user_id` (TEXT)
-- `name` (TEXT)
-- `enabled` (INTEGER)
+- `id` (VARCHAR, PK)
+- `user_id` (VARCHAR)
+- `name` (VARCHAR)
+- `enabled` (TINYINT)
 - `symbols` (TEXT)：逗号分隔的股票代码
-- `market_time_only` (INTEGER)
-- `alert_mode` (TEXT)：`percent`/`target`
-- `target_price_up` / `target_price_down` (REAL)
-- `interval_ms` (INTEGER)
-- `cooldown_minutes` (INTEGER)
-- `price_alert_percent` (REAL)
-- 指标开关（INTEGER）：
+- `market_time_only` (TINYINT)
+- `alert_mode` (VARCHAR)：`percent`/`target`
+- `target_price_up` / `target_price_down` (DOUBLE)
+- `interval_ms` (INT)
+- `cooldown_minutes` (INT)
+- `price_alert_percent` (DOUBLE)
+- 指标开关（TINYINT）：
   - `enable_macd_golden_cross`
   - `enable_rsi_oversold`
   - `enable_rsi_overbought`
   - `enable_moving_averages`
   - `enable_pattern_signal`
 - `subscription_ids_json` (TEXT)：JSON 数组字符串
-- `created_at` / `updated_at` (TEXT)
+- `created_at` / `updated_at` (VARCHAR)：ISO 字符串
 
 ### 5.3 subscriptions
 
-- `id` (TEXT, PK)
-- `user_id` (TEXT)
-- `name` (TEXT)
-- `type` (TEXT)：`dingtalk` / `wecom_robot` / `wecom_app`
-- `enabled` (INTEGER)
+- `id` (VARCHAR, PK)
+- `user_id` (VARCHAR)
+- `name` (VARCHAR)
+- `type` (VARCHAR)：`dingtalk` / `wecom_robot` / `wecom_app`
+- `enabled` (TINYINT)
 - `webhook_url` (TEXT)
-- `keyword` (TEXT)
+- `keyword` (VARCHAR)
 - 企业微信应用字段：
   - `wecom_app_corp_id`
   - `wecom_app_corp_secret`
@@ -241,27 +251,30 @@
   - `wecom_app_to_user`
   - `wecom_app_to_party`
   - `wecom_app_to_tag`
-- `created_at` / `updated_at`
+- `created_at` / `updated_at` (VARCHAR)：ISO 字符串
 
 ### 5.4 trigger_logs
 
-- `id` (TEXT, PK)
-- `user_id` (TEXT)
-- `strategy_id` (TEXT)
-- `subscription_id` (TEXT, nullable)
-- `symbol` (TEXT)
-- `stock_name` (TEXT)
+- `id` (VARCHAR, PK)
+- `user_id` (VARCHAR)
+- `strategy_id` (VARCHAR)
+- `subscription_id` (VARCHAR, nullable)
+- `symbol` (VARCHAR)
+- `stock_name` (VARCHAR)
 - `reason` (TEXT)
-- `snapshot_json` (TEXT)
-- `send_status` (TEXT)：`SENT`/`FAILED`/`NO_SUBSCRIPTION`
+- `snapshot_json` (LONGTEXT)
+- `send_status` (VARCHAR)：`SENT`/`FAILED`/`NO_SUBSCRIPTION`
 - `send_error` (TEXT)
-- `created_at` (TEXT)
+- `created_at` (VARCHAR)：ISO 字符串
 
 ## 6. 配置与环境变量
 
 - `PORT`：服务端口（默认 3001）
 - `SCAN_INTERVAL_MS`：scheduler 扫描间隔（默认 15000）
 - `AUTH_SECRET`：JWT 签名密钥（生产环境必须设置且足够随机）
+- `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD`：MySQL 连接（根目录 `.env`）
+
+本地若无 MySQL，可在仓库根目录使用 `docker-compose.mysql.yml`：`docker compose -f docker-compose.mysql.yml up -d`。
 
 ## 7. 可观测性与错误处理
 
@@ -274,7 +287,7 @@
 - OpenAPI：当前为静态 `openapi.ts`，后续可补全 schema 与鉴权说明
 - Scheduler 并发：当前顺序执行策略；策略数量上来后可考虑并发与限流
 - 权限模型：当前为“按记录 user_id 所有权 + admin 全权”，可扩展为更细粒度
-- 数据表外键：目前未显式声明外键约束（sqlite/sql.js 兼容考虑），需要强约束可后续补充
+- 数据表外键：目前未显式声明外键约束，需要强约束可后续补充
 
 ---
 

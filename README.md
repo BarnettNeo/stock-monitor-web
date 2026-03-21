@@ -6,7 +6,7 @@
 
 项目由两部分组成：
 
-- **server**：策略执行引擎 + REST API + 定时扫描 + 推送 + 本地 SQLite（`sql.js`）持久化
+- **server**：策略执行引擎 + REST API + 定时扫描 + 推送 + MySQL 持久化
 - **admin**：Web 管理后台（策略/订阅/触发日志）
 
 > 数据来自公开行情接口；系统输出仅供学习与技术交流，不构成投资建议。
@@ -29,7 +29,7 @@
 | --- | --- | --- |
 | 前端后台 | Vue 3 + Vite + Element Plus | 管理端页面 |
 | 后端服务 | Node.js + Express + TypeScript | REST API + scheduler |
-| 数据库 | sql.js (SQLite WASM) | 内存 DB + 导出为文件持久化，免原生依赖 |
+| 数据库 | MySQL | 统一持久化存储，支持索引与并发访问 |
 | 行情接口 | 新浪财经接口 | 批量报价、K线数据 |
 | 指标计算 | technicalindicators | MACD/RSI/SMA |
 
@@ -47,6 +47,15 @@ stock-monitor-web/
 ## ✅ 快速开始
 
 ### 1) 启动后端（server）
+
+**先准备 MySQL**（后端依赖 `DB_*` 连接；若本机未装 MySQL，可用 Docker 一键启动，与默认 `.env` 一致）：
+
+```bash
+# 在项目根目录 stock-monitor-web/
+docker compose -f docker-compose.mysql.yml up -d
+```
+
+然后：
 
 ```bash
 cd server
@@ -76,6 +85,9 @@ yarn dev
 
 - `PORT`：server 端口（默认 `3001`）
 - `SCAN_INTERVAL_MS`：scheduler 全局扫描间隔（默认 `15000`）
+- `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD`：MySQL 连接（Windows 上建议 `DB_HOST=127.0.0.1`，避免 `localhost` 解析到 `::1` 而本机 MySQL 未监听 IPv6）
+
+若启动时报 `ECONNREFUSED 127.0.0.1:3306`，说明 **3306 上没有 MySQL 在监听**：请先启动本机 MySQL 或使用上面的 `docker-compose.mysql.yml`。
 
 说明：
 
@@ -84,9 +96,9 @@ yarn dev
 
 ## 💾 数据存储与迁移
 
-- 数据库文件：`server/data/db.sqlite`
-- 使用 `sql.js`：运行时为内存数据库，启动后会自动迁移表结构并写回磁盘
-- 迁移逻辑：`server/src/db.ts` 中 `migrate()` 会执行 `CREATE TABLE` + `ALTER TABLE` 增量升级
+- 当前数据库：MySQL（连接配置使用根目录 `.env` 中 `DB_*` 变量）
+- 后端启动时会自动执行 MySQL `CREATE TABLE IF NOT EXISTS` 初始化
+- 若检测到旧数据文件 `server/data/db.sqlite`，后端会在首次启动时自动导入到 MySQL（一次性）
 
 ## 📊 策略说明
 

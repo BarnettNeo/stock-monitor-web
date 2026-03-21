@@ -2,8 +2,9 @@ import type { Express, Request, Response } from 'express';
 
 import axios from 'axios';
 import { requireAuth } from '../auth';
-import { getDb } from '../db';
+import { query, queryOne } from '../db';
 import { fetchKLineData, fetchStockDataBatch } from '../engine';
+import { addClause, createWhereBuilder, toWhereSql } from '../sql-utils';
 import { formatDate } from '../utils';
 
 
@@ -227,65 +228,58 @@ export function registerDashboardRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    const db = await getDb();
-
     const isAdmin = user.role === 'admin';
     const userId = user.userId;
 
     const { startIso, endIso } = getLocalDayRangeUtcIso();
 
-    let strategyWhere = isAdmin ? '' : 'WHERE user_id = ?';
-    const strategyParams = isAdmin ? [] : [userId];
+    const strategyWhereBuilder = createWhereBuilder();
+    if (!isAdmin) addClause(strategyWhereBuilder, 'user_id = ?', userId);
+    const { whereSql: strategyWhere, params: strategyParams } = toWhereSql(strategyWhereBuilder);
 
-    const strategyStmt = db.prepare(`SELECT id, enabled, symbols FROM strategies ${strategyWhere}`);
-    strategyStmt.bind(strategyParams);
-    const strategyRows: any[] = [];
-    while (strategyStmt.step()) {
-      strategyRows.push(strategyStmt.getAsObject());
-    }
-    strategyStmt.free();
+    const strategyRows = await query<any>(
+      `SELECT id, enabled, symbols FROM strategies ${strategyWhere}`,
+      strategyParams,
+    );
 
     const runningStrategies = strategyRows.filter((r) => Number((r as any).enabled) === 1).length;
     const uniqueSymbols = uniqueSymbolsFromEnabledStrategies(strategyRows);
 
     const since = typeof req.query.since === 'string' ? String(req.query.since).trim() : '';
 
-    let logWhere = 'WHERE created_at >= ? AND created_at < ?';
-    const logParams: any[] = [startIso, endIso];
+    // 大屏统计的查询条件会被 count / latest / trend 多处复用，统一构建可减少遗漏。
+    const logWhereBuilder = createWhereBuilder();
+    addClause(logWhereBuilder, 'created_at >= ?', startIso);
+    addClause(logWhereBuilder, 'created_at < ?', endIso);
     if (!isAdmin) {
-      logWhere += ' AND user_id = ?';
-      logParams.push(userId);
+      addClause(logWhereBuilder, 'user_id = ?', userId);
     }
+    const { whereSql: logWhere, params: logParams } = toWhereSql(logWhereBuilder);
 
-    const countStmt = db.prepare(`SELECT COUNT(*) AS cnt FROM trigger_logs ${logWhere}`);
-    countStmt.bind(logParams);
-    const todayTriggers = countStmt.step() ? Number((countStmt.getAsObject() as any).cnt || 0) : 0;
-    countStmt.free();
+    const countRow = await queryOne<any>(`SELECT COUNT(*) AS cnt FROM trigger_logs ${logWhere}`, logParams);
+    const todayTriggers = Number(countRow?.cnt || 0);
 
-    const pushStmt = db.prepare(
+    const pushRow = await queryOne<any>(
       `SELECT
         SUM(CASE WHEN send_status IN ('SENT','FAILED') THEN 1 ELSE 0 END) AS total,
         SUM(CASE WHEN send_status = 'SENT' THEN 1 ELSE 0 END) AS success
       FROM trigger_logs ${logWhere}`,
+      logParams,
     );
-    pushStmt.bind(logParams);
-    const pushRow = pushStmt.step() ? (pushStmt.getAsObject() as any) : null;
-    pushStmt.free();
     const pushTotal = pushRow ? Number(pushRow.total || 0) : 0;
     const pushSuccess = pushRow ? Number(pushRow.success || 0) : 0;
     const pushSuccessRate = pushTotal > 0 ? pushSuccess / pushTotal : undefined;
 
-    const latestStmt = db.prepare(
+    const latestRows = await query<any>(
       `SELECT id, created_at, symbol, stock_name, reason
        FROM trigger_logs ${logWhere}
        ORDER BY created_at DESC
        LIMIT 20`,
+      logParams,
     );
-    latestStmt.bind(logParams);
     const latestTriggers: any[] = [];
     let latestCreatedAtIso: string | null = null;
-    while (latestStmt.step()) {
-      const r: any = latestStmt.getAsObject();
+    for (const r of latestRows) {
       if (!latestCreatedAtIso) latestCreatedAtIso = String(r.created_at || '') || null;
       latestTriggers.push({
         id: String(r.id),
@@ -295,20 +289,18 @@ export function registerDashboardRoutes(app: Express): void {
         reason: String(r.reason || ''),
       });
     }
-    latestStmt.free();
 
     let deltaTriggers: any[] = [];
     if (since) {
-      const deltaStmt = db.prepare(
+      const deltaRows = await query<any>(
         `SELECT id, created_at, symbol, stock_name, reason
          FROM trigger_logs
          ${logWhere} AND created_at > ?
          ORDER BY created_at DESC
          LIMIT 50`,
+        [...logParams, since],
       );
-      deltaStmt.bind([...logParams, since]);
-      while (deltaStmt.step()) {
-        const r: any = deltaStmt.getAsObject();
+      for (const r of deltaRows) {
         deltaTriggers.push({
           id: String(r.id),
           createdAt: formatDate(String(r.created_at || '')),
@@ -317,14 +309,11 @@ export function registerDashboardRoutes(app: Express): void {
           reason: String(r.reason || ''),
         });
       }
-      deltaStmt.free();
     }
 
     const hourCountMap = new Map<string, number>();
-    const trendStmt = db.prepare(`SELECT created_at FROM trigger_logs ${logWhere}`);
-    trendStmt.bind(logParams);
-    while (trendStmt.step()) {
-      const r: any = trendStmt.getAsObject();
+    const trendRows = await query<any>(`SELECT created_at FROM trigger_logs ${logWhere}`, logParams);
+    for (const r of trendRows) {
       const iso = String(r.created_at || '');
       const d = new Date(iso);
       if (isNaN(d.getTime())) continue;
@@ -332,7 +321,6 @@ export function registerDashboardRoutes(app: Express): void {
       const key = `${hh}:00`;
       hourCountMap.set(key, (hourCountMap.get(key) || 0) + 1);
     }
-    trendStmt.free();
 
     const targetHours = Array.from({ length: 24 }, (_, i) => `${String(i).padStart(2, '0')}:00`);
     const todayTrend = toHourBuckets(hourCountMap, targetHours);

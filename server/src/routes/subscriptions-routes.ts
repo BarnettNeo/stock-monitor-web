@@ -2,10 +2,11 @@ import type { Express, Request, Response } from 'express';
 import { z } from 'zod';
 import crypto from 'node:crypto';
 
-import { getDb, persist } from '../db';
+import { execute, query, queryOne } from '../db';
 import { requireAuth } from '../auth';
 import { boolToInt, handleApiError, nowIso } from '../utils';
 import { rowToSubscription } from '../mappers';
+import { addClause, createWhereBuilder, toWhereSql } from '../sql-utils';
 
 // 订阅管理 API
 // - 列表支持 name/username 模糊查询
@@ -39,37 +40,27 @@ export function registerSubscriptionRoutes(app: Express): void {
     const qName = typeof req.query?.name === 'string' ? String(req.query.name).trim() : '';
     const qUsername = typeof req.query?.username === 'string' ? String(req.query.username).trim() : '';
 
-    const db = await getDb();
-
-    const where: string[] = [];
-    const params: any[] = [];
+    const where = createWhereBuilder();
     if (qName) {
-      where.push('s.name LIKE ?');
-      params.push(`%${qName}%`);
+      addClause(where, 's.name LIKE ?', `%${qName}%`);
     }
     if (qUsername) {
-      where.push('u.username LIKE ?');
-      params.push(`%${qUsername}%`);
+      addClause(where, 'u.username LIKE ?', `%${qUsername}%`);
     }
-    const whereSql = where.length > 0 ? `WHERE ${where.join(' AND ')}` : '';
+    const { whereSql, params } = toWhereSql(where);
 
-    const stmt = db.prepare(
+    const rows = await query<any>(
       `SELECT s.*, u.username AS created_by_username
        FROM subscriptions s
        LEFT JOIN users u ON u.id = s.user_id
        ${whereSql}
        ORDER BY s.updated_at DESC`,
+      params,
     );
-    stmt.bind(params);
-    const items: any[] = [];
-    while (stmt.step()) {
-      const row = stmt.getAsObject();
-      items.push({
-        ...rowToSubscription(row),
-        createdByUsername: (row as any).created_by_username || (row as any).user_id || null,
-      });
-    }
-    stmt.free();
+    const items: any[] = rows.map((row) => ({
+      ...rowToSubscription(row),
+      createdByUsername: (row as any).created_by_username || (row as any).user_id || null,
+    }));
 
     res.json({ items });
   });
@@ -78,16 +69,14 @@ export function registerSubscriptionRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    const db = await getDb();
-    const stmt = db.prepare(
+    const row = await queryOne<any>(
       `SELECT s.*, u.username AS created_by_username
        FROM subscriptions s
        LEFT JOIN users u ON u.id = s.user_id
-       WHERE s.id = ?`,
+       WHERE s.id = ?
+       LIMIT 1`,
+      [req.params.id],
     );
-    stmt.bind([req.params.id]);
-    const row = stmt.step() ? stmt.getAsObject() : null;
-    stmt.free();
     if (!row) return res.status(404).json({ error: 'Not found' });
 
     res.json({
@@ -106,9 +95,7 @@ export function registerSubscriptionRoutes(app: Express): void {
       const parsed = SubscriptionInputSchema.parse(req.body);
       const id = crypto.randomUUID();
       const ts = nowIso();
-      const db = await getDb();
-
-      db.run(
+      await execute(
         `INSERT INTO subscriptions (
           id,user_id,name,type,enabled,webhook_url,keyword,
           wecom_app_corp_id,wecom_app_corp_secret,wecom_app_agent_id,wecom_app_to_user,wecom_app_to_party,wecom_app_to_tag,
@@ -133,7 +120,6 @@ export function registerSubscriptionRoutes(app: Express): void {
         ],
       );
 
-      persist();
       res.json({ id });
     } catch (error: any) {
       const { status, message } = handleApiError(error);
@@ -148,19 +134,17 @@ export function registerSubscriptionRoutes(app: Express): void {
 
       const parsed = SubscriptionInputSchema.parse(req.body);
       const ts = nowIso();
-      const db = await getDb();
-
-      const stmtOwner = db.prepare('SELECT user_id FROM subscriptions WHERE id = ?');
-      stmtOwner.bind([req.params.id]);
-      const ownerRow = stmtOwner.step() ? stmtOwner.getAsObject() : null;
-      stmtOwner.free();
+      const ownerRow = await queryOne<any>(
+        'SELECT user_id FROM subscriptions WHERE id = ? LIMIT 1',
+        [req.params.id],
+      );
       if (!ownerRow) return res.status(404).json({ message: 'Not found' });
       const ownerId = (ownerRow as any).user_id ? String((ownerRow as any).user_id) : '';
       if (user.role !== 'admin' && ownerId !== user.userId) {
         return res.status(403).json({ message: 'Forbidden' });
       }
 
-      db.run(
+      await execute(
         `UPDATE subscriptions SET
           user_id=?,name=?,type=?,enabled=?,webhook_url=?,keyword=?,
           wecom_app_corp_id=?,wecom_app_corp_secret=?,wecom_app_agent_id=?,wecom_app_to_user=?,wecom_app_to_party=?,wecom_app_to_tag=?,
@@ -184,7 +168,6 @@ export function registerSubscriptionRoutes(app: Express): void {
         ],
       );
 
-      persist();
       res.json({ ok: true });
     } catch (error: any) {
       const { status, message } = handleApiError(error);
@@ -196,20 +179,17 @@ export function registerSubscriptionRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    const db = await getDb();
-
-    const stmtOwner = db.prepare('SELECT user_id FROM subscriptions WHERE id = ?');
-    stmtOwner.bind([req.params.id]);
-    const ownerRow = stmtOwner.step() ? stmtOwner.getAsObject() : null;
-    stmtOwner.free();
+    const ownerRow = await queryOne<any>(
+      'SELECT user_id FROM subscriptions WHERE id = ? LIMIT 1',
+      [req.params.id],
+    );
     if (!ownerRow) return res.status(404).json({ message: 'Not found' });
     const ownerId = (ownerRow as any).user_id ? String((ownerRow as any).user_id) : '';
     if (user.role !== 'admin' && ownerId !== user.userId) {
       return res.status(403).json({ message: 'Forbidden' });
     }
 
-    db.run('DELETE FROM subscriptions WHERE id = ?', [req.params.id]);
-    persist();
+    await execute('DELETE FROM subscriptions WHERE id = ?', [req.params.id]);
     res.json({ ok: true });
   });
 }

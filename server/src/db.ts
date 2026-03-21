@@ -1,205 +1,365 @@
 import fs from 'node:fs';
 import path from 'node:path';
-import initSqlJs, { type Database, type SqlJsStatic } from 'sql.js';
+import mysql, { type Pool, type ResultSetHeader } from 'mysql2/promise';
+import initSqlJs, { type Database as SqlJsDb, type SqlJsStatic } from 'sql.js';
 
 const DATA_DIR = path.resolve(__dirname, '../data');
-const DB_PATH = path.join(DATA_DIR, 'db.sqlite');
+const SQLITE_PATH = path.join(DATA_DIR, 'db.sqlite');
+const MIGRATION_KEY = 'sqlite_import_v1_done';
 
+let pool: Pool | null = null;
+let initPromise: Promise<void> | null = null;
 let SQL: SqlJsStatic | null = null;
-let db: Database | null = null;
 
-function ensureDataDir(): void {
-  if (!fs.existsSync(DATA_DIR)) {
-    fs.mkdirSync(DATA_DIR, { recursive: true });
+function getDbConfig(): {
+  host: string;
+  port: number;
+  database: string;
+  user: string;
+  password: string;
+} {
+  // Windows 上 `localhost` 常解析为 IPv6 `::1`，而本机 MySQL 往往只监听 IPv4，会导致 ECONNREFUSED ::1:3306。
+  let host = String(process.env.DB_HOST || '127.0.0.1').trim();
+  const lower = host.toLowerCase();
+  if (lower === 'localhost' || host === '::1') {
+    host = '127.0.0.1';
   }
+  return {
+    host,
+    port: Number(process.env.DB_PORT || 3306),
+    database: String(process.env.DB_NAME || 'stock_monitor'),
+    user: String(process.env.DB_USER || 'root'),
+    password: String(process.env.DB_PASSWORD || ''),
+  };
 }
 
-/**
- * 获取（并初始化）本地 SQLite 数据库。
- * 使用 sql.js（WASM）避免在 Windows 上安装原生 sqlite 依赖。
- */
-export async function getDb(): Promise<Database> {
-  if (db) return db;
+// 在 pool 已创建、且尚未 await initPromise 时执行 SQL（避免 execute→getDb→ensureInitialized→initPromise 递归）
+async function executeOnPool(
+  sql: string,
+  params: any[] = [],
+): Promise<ResultSetHeader> {
+  const p = pool as Pool;
+  const [result] = await p.execute(sql, params);
+  return result as ResultSetHeader;
+}
 
-  ensureDataDir();
+async function queryOnPool<T = any>(sql: string, params: any[] = []): Promise<T[]> {
+  const p = pool as Pool;
+  const [rows] = await p.query(sql, params);
+  return rows as T[];
+}
 
-  if (!SQL) {
-    SQL = await initSqlJs({
-      locateFile: (file: string) => {
-        return require.resolve(`sql.js/dist/${file}`);
-      },
+async function queryOneOnPool<T = any>(sql: string, params: any[] = []): Promise<T | null> {
+  const rows = await queryOnPool<T>(sql, params);
+  return rows[0] || null;
+}
+
+// 确保数据库连接池已初始化
+async function ensureInitialized(): Promise<void> {
+  if (!pool) {
+    const cfg = getDbConfig();
+    pool = mysql.createPool({
+      host: cfg.host,
+      port: cfg.port,
+      user: cfg.user,
+      password: cfg.password,
+      database: cfg.database,
+      waitForConnections: true,
+      connectionLimit: 10,
+      queueLimit: 0,
+      charset: 'utf8mb4',
     });
   }
 
-  const fileBuffer = fs.existsSync(DB_PATH) ? fs.readFileSync(DB_PATH) : null;
-  db = fileBuffer ? new SQL.Database(fileBuffer) : new SQL.Database();
+  if (!initPromise) {
+    // 只初始化一次：先确保 MySQL schema 可用，再尝试执行 SQLite 历史数据导入。
+    // 迁移阶段必须用 executeOnPool，禁止调用 execute()/getDb()，否则会再次进入 ensureInitialized 造成栈溢出。
+    initPromise = (async () => {
+      try {
+        await migrateMySqlSchema();
+        await migrateFromSqliteIfNeeded();
+      } catch (e: any) {
+        const cfg = getDbConfig();
+        const code = e?.code;
+        if (code === 'ECONNREFUSED' || code === 'ETIMEDOUT') {
+          throw new Error(
+            [
+              `无法连接 MySQL：${cfg.host}:${cfg.port}（${code}）`,
+              '请在本机启动 MySQL 服务，或确认端口与防火墙设置。',
+              '若尚未安装 MySQL，可在项目根目录执行：',
+              '  docker compose -f docker-compose.mysql.yml up -d',
+              '并保证根目录 .env 中 DB_HOST/DB_PORT/DB_NAME/DB_USER/DB_PASSWORD 与 compose 中配置一致。',
+              `原始错误：${e?.message || String(e)}`,
+            ].join('\n'),
+          );
+        }
+        if (code === 'ER_ACCESS_DENIED_ERROR' || code === 'ER_BAD_DB_ERROR') {
+          throw new Error(
+            [
+              `MySQL 拒绝连接或数据库不存在：${e?.message || String(e)}`,
+              `当前配置：host=${cfg.host} port=${cfg.port} database=${cfg.database} user=${cfg.user}`,
+              '请检查 .env 中 DB_* 是否与 MySQL 实例一致，并确认已创建数据库（如 CREATE DATABASE stock_monitor）。',
+            ].join('\n'),
+          );
+        }
+        throw e;
+      }
+    })();
+  }
+  await initPromise;
+}
 
-  // 首次启动或升级后：确保表结构存在且字段齐全
-  migrate(db);
-  // 初始化/迁移后立即落盘，避免意外退出造成 schema 丢失
-  persist();
+// 获取数据库连接池
+export async function getDb(): Promise<Pool> {
+  await ensureInitialized();
+  return pool as Pool;
+}
 
-  return db;
+// 执行多行查询
+export async function query<T = any>(
+  sql: string,
+  params: any[] = [],
+): Promise<T[]> {
+  const p = await getDb();
+  const [rows] = await p.query(sql, params);
+  return rows as T[];
+}
+
+// 执行单行查询
+export async function queryOne<T = any>(
+  sql: string,
+  params: any[] = [],
+): Promise<T | null> {
+  const rows = await query<T>(sql, params);
+  return rows[0] || null;
+}
+
+// 执行 SQL 语句
+export async function execute(
+  sql: string,
+  params: any[] = [],
+): Promise<ResultSetHeader> {
+  const p = await getDb();
+  const [result] = await p.execute(sql, params);
+  return result as ResultSetHeader;
 }
 
 export function persist(): void {
-  if (!db) return;
-  ensureDataDir();
-
-  // sql.js 属于内存数据库，这里通过 export() + 写文件的方式持久化到磁盘。
-  const data = db.export();
-  fs.writeFileSync(DB_PATH, Buffer.from(data));
+  // MySQL 无需手动 persist；保留空实现，兼容旧调用方。
 }
 
-/**
- * 获取表的当前列集合，用于判断是否需要 ALTER TABLE。
- */
-function getTableColumns(database: Database, table: string): Set<string> {
-  const result = database.exec(`PRAGMA table_info(${table});`);
-  const rows = result[0]?.values || [];
-  // PRAGMA table_info columns: cid, name, type, notnull, dflt_value, pk
-  const names = rows.map((r: any[]) => String(r[1]));
-  return new Set(names);
-}
-
-/**
- * 数据库迁移：
- * - 新库：CREATE TABLE IF NOT EXISTS 创建完整结构
- * - 老库：通过 PRAGMA table_info 判断缺失字段后 ALTER TABLE 增量升级
- */
-function migrate(database: Database): void {
-  // 基础表结构（全新数据库会走这里创建完整表）
-  database.run(`
+// 迁移 MySQL 数据库架构
+async function migrateMySqlSchema(): Promise<void> {
+  await executeOnPool(`
     CREATE TABLE IF NOT EXISTS users (
-      id TEXT PRIMARY KEY,
-      username TEXT NOT NULL UNIQUE,
-      password_salt TEXT NOT NULL,
-      password_hash TEXT NOT NULL,
-      role TEXT NOT NULL,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
+      id VARCHAR(64) PRIMARY KEY,
+      username VARCHAR(64) NOT NULL UNIQUE,
+      password_salt VARCHAR(128) NOT NULL,
+      password_hash VARCHAR(256) NOT NULL,
+      role VARCHAR(16) NOT NULL,
+      created_at VARCHAR(40) NOT NULL,
+      updated_at VARCHAR(40) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
-  database.run(`
+  await executeOnPool(`
     CREATE TABLE IF NOT EXISTS strategies (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      name TEXT NOT NULL,
-      enabled INTEGER NOT NULL,
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64),
+      name VARCHAR(255) NOT NULL,
+      enabled TINYINT NOT NULL,
       symbols TEXT NOT NULL,
-      market_time_only INTEGER NOT NULL DEFAULT 1,
-      -- 报警模式（策略级别二选一）：
-      -- - percent: 大幅异动监控（使用 price_alert_percent）
-      -- - target: 目标价触发（使用 target_price_up/down，忽略 price_alert_percent）
-      alert_mode TEXT,
-      -- 目标价触发：上行/下行（可空；为兼容旧版 monitor.ts 的功能）
-      target_price_up REAL,
-      target_price_down REAL,
-      interval_ms INTEGER NOT NULL,
-      cooldown_minutes INTEGER NOT NULL,
-      price_alert_percent REAL NOT NULL,
-      enable_macd_golden_cross INTEGER NOT NULL,
-      enable_rsi_oversold INTEGER NOT NULL,
-      enable_rsi_overbought INTEGER NOT NULL,
-      enable_moving_averages INTEGER NOT NULL,
-      enable_pattern_signal INTEGER NOT NULL,
-      -- JSON 数组字符串：该策略绑定的订阅 ID 列表
+      market_time_only TINYINT NOT NULL DEFAULT 1,
+      alert_mode VARCHAR(16),
+      target_price_up DOUBLE,
+      target_price_down DOUBLE,
+      interval_ms INT NOT NULL,
+      cooldown_minutes INT NOT NULL,
+      price_alert_percent DOUBLE NOT NULL,
+      enable_macd_golden_cross TINYINT NOT NULL,
+      enable_rsi_oversold TINYINT NOT NULL,
+      enable_rsi_overbought TINYINT NOT NULL,
+      enable_moving_averages TINYINT NOT NULL,
+      enable_pattern_signal TINYINT NOT NULL,
       subscription_ids_json TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
+      created_at VARCHAR(40) NOT NULL,
+      updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_strategies_user_id (user_id),
+      INDEX idx_strategies_updated_at (updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
-  database.run(`
+  await executeOnPool(`
     CREATE TABLE IF NOT EXISTS subscriptions (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      name TEXT NOT NULL,
-      type TEXT NOT NULL,
-      enabled INTEGER NOT NULL,
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64),
+      name VARCHAR(255) NOT NULL,
+      type VARCHAR(32) NOT NULL,
+      enabled TINYINT NOT NULL,
       webhook_url TEXT,
-      keyword TEXT,
-      wecom_app_corp_id TEXT,
-      wecom_app_corp_secret TEXT,
-      wecom_app_agent_id INTEGER,
-      wecom_app_to_user TEXT,
-      wecom_app_to_party TEXT,
-      wecom_app_to_tag TEXT,
-      created_at TEXT NOT NULL,
-      updated_at TEXT NOT NULL
-    );
+      keyword VARCHAR(255),
+      wecom_app_corp_id VARCHAR(255),
+      wecom_app_corp_secret VARCHAR(255),
+      wecom_app_agent_id INT,
+      wecom_app_to_user VARCHAR(255),
+      wecom_app_to_party VARCHAR(255),
+      wecom_app_to_tag VARCHAR(255),
+      created_at VARCHAR(40) NOT NULL,
+      updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_subscriptions_user_id (user_id),
+      INDEX idx_subscriptions_updated_at (updated_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
-  database.run(`
+  await executeOnPool(`
     CREATE TABLE IF NOT EXISTS trigger_logs (
-      id TEXT PRIMARY KEY,
-      user_id TEXT,
-      strategy_id TEXT,
-      subscription_id TEXT,
-      symbol TEXT NOT NULL,
-      stock_name TEXT,
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64),
+      strategy_id VARCHAR(64),
+      subscription_id VARCHAR(64),
+      symbol VARCHAR(32) NOT NULL,
+      stock_name VARCHAR(255),
       reason TEXT NOT NULL,
-      snapshot_json TEXT NOT NULL,
-      -- 推送结果（每个订阅一条记录）
-      send_status TEXT,
+      snapshot_json LONGTEXT NOT NULL,
+      send_status VARCHAR(32),
       send_error TEXT,
-      created_at TEXT NOT NULL
-    );
+      created_at VARCHAR(40) NOT NULL,
+      INDEX idx_trigger_logs_user_id (user_id),
+      INDEX idx_trigger_logs_symbol (symbol),
+      INDEX idx_trigger_logs_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
-  // 对已有数据库做增量迁移（ALTER TABLE）
-  const strategyCols = getTableColumns(database, 'strategies');
-  if (!strategyCols.has('subscription_ids_json')) {
-    database.run('ALTER TABLE strategies ADD COLUMN subscription_ids_json TEXT;');
-  }
-  if (!strategyCols.has('alert_mode')) {
-    database.run('ALTER TABLE strategies ADD COLUMN alert_mode TEXT;');
-  }
-  if (!strategyCols.has('market_time_only')) {
-    database.run('ALTER TABLE strategies ADD COLUMN market_time_only INTEGER;');
-  }
-  if (!strategyCols.has('target_price_up')) {
-    database.run('ALTER TABLE strategies ADD COLUMN target_price_up REAL;');
-  }
-  if (!strategyCols.has('target_price_down')) {
-    database.run('ALTER TABLE strategies ADD COLUMN target_price_down REAL;');
+  await executeOnPool(`
+    CREATE TABLE IF NOT EXISTS _meta (
+      meta_key VARCHAR(128) PRIMARY KEY,
+      meta_value TEXT,
+      updated_at VARCHAR(40) NOT NULL
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  await executeOnPool(
+    "UPDATE strategies SET alert_mode = 'percent' WHERE alert_mode IS NULL OR alert_mode = ''",
+  );
+  await executeOnPool(
+    'UPDATE strategies SET market_time_only = 1 WHERE market_time_only IS NULL',
+  );
+}
+
+// 迁移 SQLite 历史数据
+async function migrateFromSqliteIfNeeded(): Promise<void> {
+  const marker = await queryOneOnPool<{ meta_key: string }>(
+    'SELECT meta_key FROM _meta WHERE meta_key = ? LIMIT 1',
+    [MIGRATION_KEY],
+  );
+  if (marker) return;
+  if (!fs.existsSync(SQLITE_PATH)) {
+    await markMigrationDone('sqlite file not found');
+    return;
   }
 
-  // 为存量数据回填默认告警模式，避免前端展示空值
-  if (strategyCols.has('alert_mode')) {
-    database.run("UPDATE strategies SET alert_mode = 'percent' WHERE alert_mode IS NULL OR alert_mode = ''; ");
+  if (!SQL) {
+    SQL = await initSqlJs({
+      locateFile: (file: string) => require.resolve(`sql.js/dist/${file}`),
+    });
   }
 
-  // 为存量数据回填默认仅交易时间推送（默认开启）
-  if (strategyCols.has('market_time_only')) {
-    database.run('UPDATE strategies SET market_time_only = 1 WHERE market_time_only IS NULL;');
+  const fileBuffer = fs.readFileSync(SQLITE_PATH);
+  const sqliteDb = new SQL.Database(fileBuffer);
+  try {
+    // 按表顺序导入，使用 ON DUPLICATE KEY 跳过已存在主键，保证可幂等重试。
+    await migrateSqliteTable(sqliteDb, 'users', [
+      'id',
+      'username',
+      'password_salt',
+      'password_hash',
+      'role',
+      'created_at',
+      'updated_at',
+    ]);
+    await migrateSqliteTable(sqliteDb, 'strategies', [
+      'id',
+      'user_id',
+      'name',
+      'enabled',
+      'symbols',
+      'market_time_only',
+      'alert_mode',
+      'target_price_up',
+      'target_price_down',
+      'interval_ms',
+      'cooldown_minutes',
+      'price_alert_percent',
+      'enable_macd_golden_cross',
+      'enable_rsi_oversold',
+      'enable_rsi_overbought',
+      'enable_moving_averages',
+      'enable_pattern_signal',
+      'subscription_ids_json',
+      'created_at',
+      'updated_at',
+    ]);
+    await migrateSqliteTable(sqliteDb, 'subscriptions', [
+      'id',
+      'user_id',
+      'name',
+      'type',
+      'enabled',
+      'webhook_url',
+      'keyword',
+      'wecom_app_corp_id',
+      'wecom_app_corp_secret',
+      'wecom_app_agent_id',
+      'wecom_app_to_user',
+      'wecom_app_to_party',
+      'wecom_app_to_tag',
+      'created_at',
+      'updated_at',
+    ]);
+    await migrateSqliteTable(sqliteDb, 'trigger_logs', [
+      'id',
+      'user_id',
+      'strategy_id',
+      'subscription_id',
+      'symbol',
+      'stock_name',
+      'reason',
+      'snapshot_json',
+      'send_status',
+      'send_error',
+      'created_at',
+    ]);
+    await markMigrationDone('ok');
+  } finally {
+    sqliteDb.close();
   }
+}
 
-  const logCols = getTableColumns(database, 'trigger_logs');
-  if (!logCols.has('send_status')) {
-    database.run('ALTER TABLE trigger_logs ADD COLUMN send_status TEXT;');
-  }
-  if (!logCols.has('send_error')) {
-    database.run('ALTER TABLE trigger_logs ADD COLUMN send_error TEXT;');
-  }
+// 按表顺序导入，使用 ON DUPLICATE KEY 跳过已存在主键，保证可幂等重试。
+async function migrateSqliteTable(
+  sqliteDb: SqlJsDb,
+  table: string,
+  columns: string[],
+): Promise<void> {
+  const sql = `SELECT ${columns.join(',')} FROM ${table}`;
+  const result = sqliteDb.exec(sql);
+  const rows = result[0]?.values || [];
+  if (!rows.length) return;
 
-  const userCols = getTableColumns(database, 'users');
-  if (userCols.size > 0) {
-    if (!userCols.has('role')) {
-      database.run('ALTER TABLE users ADD COLUMN role TEXT;');
-    }
-    if (!userCols.has('password_salt')) {
-      database.run('ALTER TABLE users ADD COLUMN password_salt TEXT;');
-    }
-    if (!userCols.has('password_hash')) {
-      database.run('ALTER TABLE users ADD COLUMN password_hash TEXT;');
-    }
-    if (!userCols.has('created_at')) {
-      database.run('ALTER TABLE users ADD COLUMN created_at TEXT;');
-    }
-    if (!userCols.has('updated_at')) {
-      database.run('ALTER TABLE users ADD COLUMN updated_at TEXT;');
-    }
+  const placeholders = columns.map(() => '?').join(',');
+  const insertSql = `INSERT INTO ${table} (${columns.join(',')}) VALUES (${placeholders}) ON DUPLICATE KEY UPDATE id=id`;
+
+  for (const row of rows) {
+    await executeOnPool(insertSql, row as any[]);
   }
+}
+
+// 标记迁移完成，用于幂等重试。
+async function markMigrationDone(status: string): Promise<void> {
+  await executeOnPool(
+    `INSERT INTO _meta (meta_key, meta_value, updated_at)
+     VALUES (?, ?, ?)
+     ON DUPLICATE KEY UPDATE meta_value = VALUES(meta_value), updated_at = VALUES(updated_at)`,
+    [MIGRATION_KEY, status, new Date().toISOString()],
+  );
 }
