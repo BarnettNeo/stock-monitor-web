@@ -1,7 +1,25 @@
 <template>
-  <div class="screen min-h-screen text-slate-200 p-4 box-border">
+  <div class="screen text-slate-200 p-4 box-border flex flex-col h-full">
     <div class="panel panel--strong flex items-center justify-between p-3 px-4">
       <div class="text-xl font-extrabold tracking-wide">监控大盘</div>
+      <!-- 监控大盘卡片 -->
+      <div>
+        <template v-if="currentUser && currentUser.role !== 'admin' && data?.kpis?.monitoredSymbols === 0">
+            <div class="text-center">
+              <p class="text-lg mb-1">您当前还没有配置任何监控策略。</p>
+              <el-button type="primary" @click="goToStrategies">前往配置</el-button>
+            </div>
+        </template>
+        <template v-else>
+          <div class="grid grid-cols-4 gap-24 max-[1280px]:grid-cols-2">
+            <div v-for="c in kpiCards" :key="c.label" class="flex flex items-center justify-center gap-4">
+              <div class="kpi-label">{{ c.label }}</div>
+              <div class="kpi-value tabular-nums">{{ c.value }}</div>
+            </div>
+          </div>
+        </template>
+      </div>
+
       <div class="flex gap-2 items-center">
         <div class="text-slate-300 tabular-nums">{{ displayTime }}</div>
         <el-button size="small" @click="refreshNow" :loading="loading">刷新</el-button>
@@ -9,28 +27,11 @@
       </div>
     </div>
 
-    <div v-if="currentUser && currentUser.role !== 'admin' && data?.kpis?.monitoredSymbols === 0" class="mt-3">
-      <div class="panel panel--strong">
-        <div class="text-center p-6">
-          <p class="text-lg mb-4">您当前还没有配置任何监控策略。</p>
-          <el-button type="primary" @click="goToStrategies">前往配置</el-button>
-        </div>
-      </div>
-    </div>
-
-    <!-- 监控大盘卡片 -->
-    <div v-else class="grid grid-cols-4 gap-3 mt-3 max-[1280px]:grid-cols-2">
-      <div v-for="c in kpiCards" :key="c.label" class="panel p-4">
-        <div class="kpi-label">{{ c.label }}</div>
-        <div class="kpi-value tabular-nums">{{ c.value }}</div>
-      </div>
-    </div>
-
     <!-- 实时触发动态卡片 -->
-    <div class="grid grid-cols-[1fr_1fr] gap-3 mt-3 max-[1280px]:grid-cols-1">
+    <div class="grid grid-cols-3 gap-3 mt-3 max-[1280px]:grid-cols-1">
       <div class="panel p-3">
         <div class="panel-title">实时触发动态</div>
-        <div class="h-[260px] overflow-hidden" v-loading="loading && !data">
+        <div class="h-[160px] overflow-hidden" v-loading="loading && !data">
           <div v-if="!data?.latestTriggers?.length" class="text-slate-400 p-6">暂无数据</div>
           <div v-else ref="feedContainerEl" class="feed-container">
             <div ref="feedListEl" class="feed-list">
@@ -59,14 +60,33 @@
 
       <div class="panel p-3">
         <div class="panel-title">今日触发趋势</div>
-        <div ref="trendEl" class="h-[300px] w-full"></div>
+        <div ref="trendEl" class="h-[200px] w-full"></div>
+      </div>
+
+      <!-- 最近一次异动详情卡片 -->
+      <div class="panel p-3">
+        <div class="panel-title">最近一次异动详情</div>
+        <div v-loading="detailLoading">
+          <div v-if="!detail" class="text-slate-400 p-6">暂无触发详情</div>
+          <div v-else class="grid grid-cols-[360px_1fr] gap-3 items-stretch max-[1280px]:grid-cols-1">
+            <div>
+              <div ref="miniKlineEl" class="h-[200px] w-full"></div>
+            </div>
+            <div>
+              <div class="font-extrabold text-base">{{ detail.stockName || detail.symbol }} - {{ detail.reason }}</div>
+              <div class="text-slate-200 mt-2">触发时间：{{ detail.createdAt }}</div>
+              <div class="text-slate-200 mt-2">触发价格：{{ formatPrice(detail.snapshot?.stock?.currentPrice) }}</div>
+              <div class="text-slate-200 mt-2">原因：待ai分析生成</div>
+            </div>
+          </div>
+        </div>
       </div>
     </div>
 
+    <!-- 重点关注股票卡片 -->
     <div class="grid grid-cols-[1fr_1fr] gap-3 mt-3 max-[1280px]:grid-cols-1">
-      <!-- 重点关注股票卡片 -->
-      <div class="panel p-3 mt-3">
-        <div class="flex items-center gap-3 mb-2">
+      <div class="panel p-3">
+        <div class="flex items-center gap-3">
           <div class="panel-title mb-0">重点关注股票K线</div>
           <el-select
             v-model="focusSymbol"
@@ -80,24 +100,24 @@
         </div>
         <div v-loading="focusLoading || (loading && !data)">
           <div v-if="focusSymbolOptions.length === 0" class="text-slate-400 p-6">暂无监控标的</div>
-          <div v-else ref="focusChartEl" class="h-[260px] w-full"></div>
+          <div v-else ref="focusChartEl" class="h-[200px] w-full"></div>
         </div>
       </div>
 
       <!-- 热门股票分析 -->
-      <div class="panel p-3 mt-3">
+      <div class="panel p-3">
         <div class="panel-title">热门股票分析</div>
-        <div class="h-[220px]"></div>
+        <div class="h-[200px]"></div>
       </div>
-  </div>
+    </div>
     <!-- 近3日上涨股票卡片 -->
-    <div class="grid grid-cols-2 gap-3 mt-3 max-[1280px]:grid-cols-1">
-      <div v-for="block in hotBlocks" :key="block.key" class="panel p-3">
-        <div class="flex items-baseline justify-between mb-2">
+    <div class="gap-3 mt-3 max-[1280px]:grid-cols-1 flex flex-1 min-h-0">
+      <div v-for="block in hotBlocks" :key="block.key" class="panel p-3 flex flex-col w-[50%] h-full">
+        <div class="flex items-baseline justify-between">
           <div class="panel-title mb-0">{{ block.title }}</div>
           <div class="text-slate-500 text-xs tabular-nums">{{ hotServerTime || '' }}</div>
         </div>
-        <div v-loading="hotLoading">
+        <div v-loading="hotLoading" class="overflow-y-auto flex-1 hot-scroll">
           <div v-if="block.items.length === 0" class="text-slate-400 p-6">暂无数据</div>
           <div v-else class="grid grid-cols-2 gap-2 max-[1280px]:grid-cols-1">
             <div v-for="s in block.items" :key="s.code" class="panel-item p-3">
@@ -105,11 +125,11 @@
                 <div class="font-extrabold truncate">{{ s.name || s.code }}</div>
                 <el-button size="small" type="primary" plain @click="goToStrategiesCreate(s.code)">一键添加</el-button>
               </div>
-              <div class="flex justify-between items-baseline mt-2">
+              <div class="flex justify-between items-baseline mt-1">
                 <div class="text-slate-400 text-xs mt-1">{{ s.code }}</div>
                 <div class="text-xs tabular-nums" :class="changeClass(s.returnNd)">{{ formatChange(s.returnNd) }}</div>
               </div>
-              <div class="flex justify-between items-baseline mt-2">
+              <div class="flex justify-between items-baseline mt-1">
                 <span class="tabular-nums">{{ formatPrice(s.currentPrice) }}</span>
                 <span class="text-xs tabular-nums" :class="changeClass(s.changePercent)">
                   {{ formatChange(s.changePercent) }}
@@ -121,24 +141,6 @@
       </div>
     </div>
 
-    <!-- 最近一次异动详情卡片 -->
-    <div class="panel p-3 mt-3">
-      <div class="panel-title">最近一次异动详情</div>
-      <div v-loading="detailLoading">
-        <div v-if="!detail" class="text-slate-400 p-6">暂无触发详情</div>
-        <div v-else class="grid grid-cols-[420px_1fr] gap-3 items-stretch max-[1280px]:grid-cols-1">
-          <div>
-            <div ref="miniKlineEl" class="h-[240px] w-full"></div>
-          </div>
-          <div>
-            <div class="font-extrabold text-base">{{ detail.stockName || detail.symbol }} - {{ detail.reason }}</div>
-            <div class="text-slate-200 mt-2">触发时间：{{ detail.createdAt }}</div>
-            <div class="text-slate-200 mt-2">触发价格：{{ formatPrice(detail.snapshot?.stock?.currentPrice) }}</div>
-            <div class="text-slate-200 mt-2">原因：待ai分析生成</div>
-          </div>
-        </div>
-      </div>
-    </div>
   </div>
 </template>
 
@@ -374,7 +376,7 @@ function renderMiniKline(): void {
   chart.setOption(
     {
       backgroundColor: 'transparent',
-      grid: { left: 40, right: 20, top: 30, bottom: 50 },
+      grid: { left: 40, right: 20, top: 10, bottom: 20 },
       xAxis: {
         type: 'category',
         data: k.map((x) => x.date.slice(11, 16)),
@@ -473,7 +475,7 @@ function renderFocusChart(): void {
       { name: '最高', y: items.map((p) => p.high), color: '#f87171' },
       { name: '最低', y: items.map((p) => p.low), color: '#4ade80' },
     ],
-    grid: { left: 40, right: 20, top: 40, bottom: 30 },
+    grid: { left: 40, right: 20, top: 30, bottom: 20 },
     tooltip,
     legend,
   });
@@ -747,7 +749,7 @@ watch(focusSymbol, (sym) => {
 }
 
 .kpi-value {
-  @apply mt-2 text-2xl font-extrabold;
+  @apply text-2xl font-extrabold;
 }
 
 .panel-item {
@@ -795,5 +797,32 @@ watch(focusSymbol, (sym) => {
   position: relative;
   margin: 12px auto 0;
   display: block;
+}
+
+/* 暗色系滚动条：用于“近3日涨跌”列表，避免默认滚动条过亮突兀 */
+:deep(.hot-scroll) {
+  cursor: pointer;
+  scrollbar-width: thin; /* Firefox */
+  scrollbar-color: rgba(148, 163, 184, 0.45) rgba(2, 6, 23, 0.25);
+  scrollbar-gutter: stable;
+}
+
+:deep(.hot-scroll::-webkit-scrollbar) {
+  width: 10px;
+}
+
+:deep(.hot-scroll::-webkit-scrollbar-track) {
+  background: rgba(2, 6, 23, 0.25);
+  border-radius: 9999px;
+}
+
+:deep(.hot-scroll::-webkit-scrollbar-thumb) {
+  background: rgba(148, 163, 184, 0.35);
+  border: 2px solid rgba(2, 6, 23, 0.25);
+  border-radius: 9999px;
+}
+
+:deep(.hot-scroll::-webkit-scrollbar-thumb:hover) {
+  background: rgba(148, 163, 184, 0.55);
 }
 </style>

@@ -28,7 +28,7 @@ export function setLineChart(chart: echarts.ECharts, opts: {
   }));
 
   chart.setOption({
-    grid: opts.grid || { left: 40, right: 10, top: 10, bottom: 20 },
+    grid: opts.grid || { left: 40, right: 10, top: 0, bottom: 0 },
     legend: opts.legend,
     xAxis: {
       type: 'category',

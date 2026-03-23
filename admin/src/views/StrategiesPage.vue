@@ -17,7 +17,7 @@
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="symbols" label="股票代码" min-width="150" />
         <el-table-column prop="stockNames" label="股票名称" min-width="200" />
-        <el-table-column prop="alertMode" label="告警方式" min-width="250">
+        <el-table-column prop="alertMode" label="告警方式" min-width="230">
           <template #default="scope">
             <template v-if="scope.row.alertMode === 'target'">
               目标价触发
@@ -102,7 +102,7 @@
             <span style="color: #666">{{ scope.row.marketTimeOnly === false ? '不限' : '仅交易时段' }}</span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="120">
+        <el-table-column label="操作" width="110">
           <template #default="scope">
             <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-button link type="danger" @click="remove(scope.row.id)">删除</el-button>
