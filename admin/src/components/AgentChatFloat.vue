@@ -74,7 +74,7 @@ type Msg = { role: MsgRole; content: string; ts: number };
 
 const STORAGE_MODEL_KEY = 'agent_llm_model';
 
-const open = ref(false);
+const open = ref(true);
 
 const draft = ref('');
 const sending = ref(false);
@@ -146,10 +146,36 @@ async function send(): Promise<void> {
     const reply = String(res.data?.reply || '').trim();
     messages.value.push({ role: 'assistant', content: reply || '(empty reply)', ts: Date.now() });
   } catch (e: any) {
-    const msg = e?.response?.data?.message || e?.message || '发送失败';
+    const data = e?.response?.data;
+    const status = Number(e?.response?.status || 0);
+    const msg = data?.message || e?.message || '发送失败';
+
     ElMessage.error(String(msg));
-    messages.value.push({ role: 'system', content: `请求失败：${String(msg)}`, ts: Date.now() });
+
+    const extra: string[] = [];
+
+    // agents 服务不可用：给出可操作的提示
+    if (String(msg).includes('agents 服务不可用')) {
+      extra.push('可能原因：agents 服务未启动 / AGENTS_BASE_URL 配置错误 / 端口不通。');
+      extra.push('你可以：先启动 Python agents 服务（确保 /health 正常），再重试。');
+    }
+
+    // Node 编排失败时可能携带 toolResults：把失败原因汇总给用户
+    const toolResults = Array.isArray(data?.toolResults) ? data.toolResults : [];
+    const failed = toolResults.filter((tr: any) => tr && tr.ok === false);
+    if (failed.length > 0) {
+      extra.push(`本次有 ${failed.length} 个工具执行失败：`);
+      for (const tr of failed.slice(0, 3)) {
+        extra.push(`- ${String(tr.name || '')}: ${String(tr.error || 'unknown error')}`);
+      }
+      if (failed.length > 3) extra.push('- ...');
+    }
+
+    const statusHint = status ? `（HTTP ${status}）` : '';
+    const content = [`请求失败${statusHint}：${String(msg)}`, ...extra].join('\n');
+    messages.value.push({ role: 'system', content, ts: Date.now() });
   } finally {
+
     sending.value = false;
     scrollToBottom();
   }

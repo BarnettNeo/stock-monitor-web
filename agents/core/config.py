@@ -9,9 +9,9 @@ def load_env():
     try:
         from dotenv import load_dotenv  # type: ignore
 
-        _ROOT = Path(__file__).resolve().parents[1]
+        _ROOT = Path(__file__).resolve().parents[2]
         load_dotenv(_ROOT / '.env', override=False)
-        load_dotenv(Path(__file__).resolve().parent / '.env', override=False)
+        load_dotenv(Path(__file__).resolve().parents[1] / '.env', override=False)
     except Exception:
         pass
 

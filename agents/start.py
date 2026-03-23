@@ -39,7 +39,7 @@ class ServiceManager:
     def start_celery_worker(self):
         """启动Celery Worker"""
         print("👷 启动Celery Worker...")
-        cmd = [sys.executable, "-m", "celery", "-A", "tasks", "worker", "--loglevel=info", "--concurrency=4"]
+        cmd = [sys.executable, "-m", "celery", "-A", "domain.tasks", "worker", "--loglevel=info", "--concurrency=4"]
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         self.processes["worker"] = process
         print("✅ Celery Worker已启动")
@@ -47,7 +47,7 @@ class ServiceManager:
     def start_celery_beat(self):
         """启动Celery Beat（定时任务调度器）"""
         print("⏰ 启动Celery Beat...")
-        cmd = [sys.executable, "-m", "celery", "-A", "tasks", "beat", "--loglevel=info"]
+        cmd = [sys.executable, "-m", "celery", "-A", "domain.tasks", "beat", "--loglevel=info"]
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         self.processes["beat"] = process
         print("✅ Celery Beat已启动")
@@ -55,7 +55,7 @@ class ServiceManager:
     def start_flower(self):
         """启动Flower（Celery监控界面）"""
         print("🌸 启动Flower监控...")
-        cmd = [sys.executable, "-m", "celery", "-A", "tasks", "flower", "--port=5555"]
+        cmd = [sys.executable, "-m", "celery", "-A", "domain.tasks", "flower", "--port=5555"]
         process = subprocess.Popen(cmd, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, universal_newlines=True)
         self.processes["flower"] = process
         print("✅ Flower监控已启动 (http://localhost:5555)")

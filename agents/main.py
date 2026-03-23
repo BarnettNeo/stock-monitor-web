@@ -4,7 +4,7 @@ from typing import Any, Dict, List
 from fastapi import FastAPI, HTTPException
 from contextlib import asynccontextmanager
 
-from config import (
+from core.config import (
     APP_NAME,
     SYSTEM_PROMPT,
     _env,
@@ -14,14 +14,14 @@ from config import (
     _sanitize_model,
 )
 # from database import db_manager  # 暂时禁用PostgreSQL
-from langchain_integration import langchain_agent
-from llm import build_decision_prompt, call_openai_compatible, extract_json_object, heuristic_tool_calls
-from memory import memory
-from models import AgentChatRequest, AgentChatResponse
-from notifications import notification_manager
-from strategy import handle_create_strategy_flow, looks_like_create_strategy
+from llm.langchain_integration import langchain_agent
+from llm.llm import build_decision_prompt, call_openai_compatible, extract_json_object, heuristic_tool_calls
+from infrastructure.memory import memory
+from core.models import AgentChatRequest, AgentChatResponse
+from domain.notifications import notification_manager
+from domain.strategy import handle_create_strategy_flow, looks_like_create_strategy
 # from tasks import send_notification_async  # 暂时禁用Celery
-from tools import format_tool_results, parse_final_reply_from_llm_response, parse_tool_calls_from_llm_response
+from llm.tools import format_tool_results, parse_final_reply_from_llm_response, parse_tool_calls_from_llm_response
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -201,7 +201,7 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
     typ = str(obj.get("type") or "final")
 
     if typ == "tool_calls":
-        from models import ToolCall
+        from core.models import ToolCall
         
         tool_calls_raw = parse_tool_calls_from_llm_response(raw)
         calls: List[ToolCall] = []

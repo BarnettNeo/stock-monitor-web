@@ -6,7 +6,7 @@ from typing import Any, Dict, Optional
 
 import httpx
 
-from config import _env
+from core.config import _env
 
 
 class DingTalkNotifier:

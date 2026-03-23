@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from config import _llm_config, TOOLS_SPEC
+from core.config import _llm_config, TOOLS_SPEC
 
 
 def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
@@ -121,7 +121,7 @@ async def call_openai_compatible(
 
 def heuristic_tool_calls(message: str) -> List[Any]:
     """基于规则的工具调用（兜底方案）- 支持8个用户意图"""
-    from models import ToolCall
+    from core.models import ToolCall
     
     m = message.strip()
     if not m:
@@ -136,7 +136,7 @@ def heuristic_tool_calls(message: str) -> List[Any]:
     if any(x in m for x in ["新增策略", "创建策略", "添加策略", "监控", "设置提醒"]) and not any(
         k in m for k in ["报告", "汇总", "总结", "日报", "周报", "月报"]
     ) and not any(k in m for k in ["删除", "移除", "取消监控", "删除监控", "移除监控"]):
-        from strategy import extract_symbols_from_text
+        from domain.strategy import extract_symbols_from_text
         codes = extract_symbols_from_text(m)
         args: Dict[str, Any] = {"name": "新策略", "symbols": codes or ""}
         return [ToolCall(id="t1", name="create_strategy", arguments=args)]
@@ -144,7 +144,7 @@ def heuristic_tool_calls(message: str) -> List[Any]:
     # 3. 删除策略
     if any(x in m for x in ["删除策略", "移除策略", "取消监控", "删除监控"]):
         # 尝试提取策略名称或股票代码
-        from strategy import extract_symbols_from_text
+        from domain.strategy import extract_symbols_from_text
         codes = extract_symbols_from_text(m)
         if codes:
             return [ToolCall(id="t1", name="delete_strategy", arguments={"symbols": codes})]
@@ -159,7 +159,7 @@ def heuristic_tool_calls(message: str) -> List[Any]:
         elif any(x in m for x in ["本月", "这月"]):
             time_range = "month"
         
-        from strategy import extract_symbols_from_text
+        from domain.strategy import extract_symbols_from_text
         codes = extract_symbols_from_text(m)
         args: Dict[str, Any] = {"dateRange": time_range}
         if codes:
@@ -168,7 +168,7 @@ def heuristic_tool_calls(message: str) -> List[Any]:
 
     # 5. 获取诊断详情
     if any(x in m for x in ["诊断", "详情", "分析", "什么情况", "为什么"]):
-        from strategy import extract_symbols_from_text
+        from domain.strategy import extract_symbols_from_text
         codes = extract_symbols_from_text(m)
         if codes:
             return [ToolCall(id="t1", name="get_diagnostic", arguments={"symbol": codes[0]})]
@@ -189,7 +189,7 @@ def heuristic_tool_calls(message: str) -> List[Any]:
 
     # 7. 查询股价信息
     if any(x in m for x in ["价格", "多少钱", "股价", "现在", "当前", "涨跌"]):
-        from strategy import extract_symbols_from_text
+        from domain.strategy import extract_symbols_from_text
         codes = extract_symbols_from_text(m)
         if codes:
             return [ToolCall(id="t1", name="get_stock_info", arguments={"symbols": codes})]

@@ -9,9 +9,9 @@ from typing import Any, Dict, List
 from celery import Celery
 from celery.schedules import crontab
 
-from config import _env
-from database import db_manager, TriggerRecord
-from notifications import notification_manager
+from core.config import _env
+from infrastructure.database import db_manager, TriggerRecord
+from domain.notifications import notification_manager
 
 
 # Celery配置

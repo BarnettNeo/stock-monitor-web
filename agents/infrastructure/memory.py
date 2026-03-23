@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List
 
-from config import _env, _history_limit
+from core.config import _env, _history_limit
 
 
 class Memory:
@@ -44,7 +44,7 @@ class Memory:
         # 1. 尝试从PostgreSQL加载
         if self._use_postgresql:
             try:
-                from database import db_manager
+                from infrastructure.database import db_manager
                 session_data = await db_manager.load_user_session(user_id)
                 if session_data and "history" in session_data:
                     return session_data["history"][-limit:]
@@ -65,7 +65,7 @@ class Memory:
                 # 同步到PostgreSQL
                 if self._use_postgresql and out:
                     try:
-                        from database import db_manager
+                        from infrastructure.database import db_manager
                         session_data = {"history": out}
                         await db_manager.save_user_session(user_id, session_data)
                     except Exception:
@@ -104,7 +104,7 @@ class Memory:
         # 3. 更新PostgreSQL存储
         if self._use_postgresql:
             try:
-                from database import db_manager
+                from infrastructure.database import db_manager
                 session_data = await db_manager.load_user_session(user_id) or {}
                 history = session_data.get("history", [])
                 history.append(msg)
@@ -127,7 +127,7 @@ class Memory:
         # 1. 尝试从PostgreSQL加载
         if self._use_postgresql:
             try:
-                from database import db_manager
+                from infrastructure.database import db_manager
                 session_data = await db_manager.load_user_session(user_id)
                 if session_data and "state" in session_data:
                     return session_data["state"]
@@ -146,7 +146,7 @@ class Memory:
                 # 同步到PostgreSQL
                 if self._use_postgresql and state:
                     try:
-                        from database import db_manager
+                        from infrastructure.database import db_manager
                         session_data = await db_manager.load_user_session(user_id) or {}
                         session_data["state"] = state
                         await db_manager.save_user_session(user_id, session_data)
@@ -178,7 +178,7 @@ class Memory:
         # 3. 更新PostgreSQL存储
         if self._use_postgresql:
             try:
-                from database import db_manager
+                from infrastructure.database import db_manager
                 session_data = await db_manager.load_user_session(user_id) or {}
                 session_data["state"] = state
                 await db_manager.save_user_session(user_id, session_data)
@@ -203,7 +203,7 @@ class Memory:
         # 3. 清除PostgreSQL存储
         if self._use_postgresql:
             try:
-                from database import db_manager
+                from infrastructure.database import db_manager
                 session_data = await db_manager.load_user_session(user_id) or {}
                 session_data.pop("state", None)
                 if session_data:
@@ -240,7 +240,7 @@ class Memory:
         migrated = {"history": 0, "state": 0, "errors": []}
         
         try:
-            from database import db_manager
+            from infrastructure.database import db_manager
             
             # 迁移历史记录
             for user_id, history in self._inmem.items():

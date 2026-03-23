@@ -16,7 +16,7 @@
       <el-table :data="items" style="width: 100%" v-loading="loading">
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="webhookUrl" label="Webhook" />
-        <el-table-column prop="createdByUsername" label="创建人" width="120" />
+        <el-table-column prop="createdByUsername" label="创建人" width="250" />
         <el-table-column prop="type" label="类型" width="120" />
         <el-table-column prop="enabled" label="启用" width="80">
           <template #default="scope">

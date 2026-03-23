@@ -2,9 +2,9 @@ import json
 import re
 from typing import Any, Dict, List, Optional
 
-from llm import call_openai_compatible
-from memory import memory
-from models import AgentChatResponse, ToolCall
+from llm.llm import call_openai_compatible
+from infrastructure.memory import memory
+from core.models import AgentChatResponse, ToolCall
 
 
 def looks_like_create_strategy(message: str) -> bool:
@@ -232,7 +232,7 @@ async def llm_extract_create_strategy_args(
     if not llm.get("ok"):
         return {}
 
-    from llm import extract_json_object
+    from llm.llm import extract_json_object
     obj = extract_json_object(str(llm.get("reply") or "")) or {}
     args = obj.get("args") if isinstance(obj, dict) else None
     return args if isinstance(args, dict) else {}

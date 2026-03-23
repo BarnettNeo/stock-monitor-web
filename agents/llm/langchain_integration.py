@@ -6,10 +6,10 @@ LangChain 2026 + ReAct 模式集成
 import json
 from typing import Any, Dict, List, Optional
 
-from config import TOOLS_SPEC, SYSTEM_PROMPT
-from llm import call_openai_compatible, extract_json_object
-from memory import memory
-from models import ToolCall
+from core.config import TOOLS_SPEC, SYSTEM_PROMPT
+from llm.llm import call_openai_compatible, extract_json_object
+from infrastructure.memory import memory
+from core.models import ToolCall
 
 
 class ReActAgent:

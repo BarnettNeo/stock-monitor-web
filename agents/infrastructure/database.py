@@ -9,7 +9,7 @@ from typing import Any, Dict, List, Optional
 import asyncpg
 from pydantic import BaseModel
 
-from config import _env
+from core.config import _env
 
 
 class DatabaseConfig:

@@ -6,9 +6,9 @@ import asyncio
 import json
 from datetime import datetime
 
-from config import _env
-from database import db_manager
-from memory import memory
+from core.config import _env
+from infrastructure.database import db_manager
+from infrastructure.memory import memory
 
 
 async def migrate_redis_to_postgresql():
@@ -78,7 +78,7 @@ async def create_sample_data():
     ]
     
     # 示例策略
-    from database import StrategyRecord
+    from infrastructure.database import StrategyRecord
     sample_strategies = [
         StrategyRecord(
             id="strategy_001",
@@ -111,7 +111,7 @@ async def create_sample_data():
     ]
     
     # 示例触发记录
-    from database import TriggerRecord
+    from infrastructure.database import TriggerRecord
     sample_triggers = [
         TriggerRecord(
             id="trigger_001",
@@ -125,7 +125,7 @@ async def create_sample_data():
     ]
     
     # 示例订阅
-    from database import SubscriptionRecord
+    from infrastructure.database import SubscriptionRecord
     sample_subscriptions = [
         SubscriptionRecord(
             id="sub_001",

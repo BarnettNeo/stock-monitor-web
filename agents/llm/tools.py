@@ -1,6 +1,6 @@
 from typing import Any, Dict, List
 
-from models import ToolResult
+from core.models import ToolResult
 
 
 def format_tool_results(tool_results: List[ToolResult]) -> str:
@@ -97,7 +97,7 @@ def format_tool_results(tool_results: List[ToolResult]) -> str:
 
 def parse_tool_calls_from_llm_response(raw: str) -> List[Dict[str, Any]]:
     """从LLM响应中解析工具调用"""
-    from llm import extract_json_object
+    from llm.llm import extract_json_object
     
     obj = extract_json_object(raw) or {}
     tool_calls_raw = obj.get("toolCalls") or obj.get("tool_calls") or []
@@ -120,7 +120,7 @@ def parse_tool_calls_from_llm_response(raw: str) -> List[Dict[str, Any]]:
 
 def parse_final_reply_from_llm_response(raw: str) -> str:
     """从LLM响应中解析最终回复"""
-    from llm import extract_json_object
+    from llm.llm import extract_json_object
     
     obj = extract_json_object(raw) or {}
     reply = str(obj.get("reply") or "").strip()
