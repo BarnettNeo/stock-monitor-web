@@ -16,7 +16,7 @@ import {
   toWhereSql,
 } from '../sql-utils';
 import { boolToInt, nowIso } from '../utils';
-import { fetchStockDataBatch } from '../engine';
+import { fetchStockDataBatch, resolveSinaCodeByName } from '../engine';
 
 type ToolCall = {
   id: string;
@@ -578,8 +578,26 @@ async function toolGetStockInfo(user: AuthedUser, args: unknown): Promise<any> {
     throw new Error('symbols 不能为空');
   }
 
+  // 允许输入：sh/sz+6位、6位纯数字、或中文股票名称（例如：贵州茅台）
+  const normalized: string[] = await Promise.all(
+    syms.map(async (s) => {
+      const raw = String(s).trim();
+      if (!raw) return raw;
+      if (/^(sh|sz)(\d{6})$/i.test(raw)) return raw;
+      if (/^(\d{6})$/.test(raw)) return raw;
+
+      // 尝试用新浪 suggest 解析名称 -> symbol
+      try {
+        const resolved = await resolveSinaCodeByName(raw);
+        return resolved || raw;
+      } catch {
+        return raw;
+      }
+    }),
+  );
+
   // Node 的引擎使用新浪接口，通常要求 sh/sz 前缀（小写更稳妥）
-  const codes = syms.map((s) => {
+  const codes = normalized.map((s: string) => {
     const raw = String(s).trim();
     const m = raw.match(/^(sh|sz)(\d{6})$/i);
     if (m) return `${m[1].toLowerCase()}${m[2]}`;
@@ -714,6 +732,7 @@ export function registerAgentRoutes(app: Express): void {
     if (!message) return res.status(400).json({ message: 'message 不能为空' });
 
     const baseUrl = getAgentsBaseUrl();
+    console.log('baseUrl', baseUrl)
 
     const basePayload = {
       message,
@@ -734,9 +753,9 @@ export function registerAgentRoutes(app: Express): void {
             ...basePayload,
             toolResults,
           },
-          { timeout: 20000 },
+          { timeout: 60000 },
         );
-
+        console.log('rrrrr', r)
         const data = r.data || {};
         const toolCalls: ToolCall[] = Array.isArray(data.toolCalls) ? data.toolCalls : [];
 

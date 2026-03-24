@@ -66,9 +66,9 @@ def _sanitize_model(value: any) -> Optional[str]:
 def _port() -> int:
     """获取服务端口"""
     try:
-        return int(os.getenv("AGENTS_PORT", "8008"))
+        return int(os.getenv("AGENTS_PORT", "8009"))
     except Exception:
-        return 8008
+        return 8009
 
 
 # 系统提示词 - 优化中文自然语言理解
@@ -163,7 +163,7 @@ TOOLS_SPEC = [
         "name": "get_stock_info",
         "description": "获取股票实时信息（价格、涨跌幅等）",
         "args": {
-            "symbols": "股票代码，单个或多个（必填）",
+            "symbols": "股票代码或股票名称，单个或多个（必填；例如 'sh600519' 或 '贵州茅台'），当前或实时股票信息",
             "fields": "可选，返回字段：price,change,volume等，默认全部",
         },
     },

@@ -83,40 +83,100 @@ async def call_openai_compatible(
         "temperature": 0.2,
     }
 
-    # 通义千问Qwen3-Max的强函数调用支持
+    # JSON mode：要求模型只输出 JSON（OpenAI-compatible）
+    # DashScope 的 compatible-mode 同样支持该参数，因此统一走 response_format。
     if json_mode:
-        if is_dashscope:
-            # 通义千问使用不同的参数格式
-            payload["result_format"] = "message"
-            # 添加工具调用参数
-            payload["tools"] = [{
-                "type": "function",
-                "function": {
-                    "name": "json_response",
-                    "description": "返回JSON格式的响应",
-                    "parameters": {
-                        "type": "object",
-                        "properties": {
-                            "type": {"type": "string"},
-                            "content": {"type": "object"}
-                        }
-                    }
-                }
-            }]
-        else:
-            payload["response_format"] = {"type": "json_object"}
+        payload["response_format"] = {"type": "json_object"}
 
-    timeout = httpx.Timeout(25.0, connect=10.0)
-    async with httpx.AsyncClient(timeout=timeout) as client:
-        r = await client.post(url, json=payload, headers=headers)
-        r.raise_for_status()
-        data = r.json()
+
+    timeout = httpx.Timeout(60.0, connect=10.0)
+
+    def _extract_openai_like_message(obj: Dict[str, Any]) -> Dict[str, Any]:
+        # OpenAI-compatible: { choices: [ { message: {...} } ] }
+        if isinstance(obj.get("choices"), list) and obj["choices"]:
+            ch0 = obj["choices"][0]
+            msg = ch0.get("message") if isinstance(ch0, dict) else None
+            return msg if isinstance(msg, dict) else {}
+        # DashScope 非兼容形态（兜底）：{ output: { choices: [ { message: {...} } ] } }
+        out = obj.get("output")
+        if isinstance(out, dict) and isinstance(out.get("choices"), list) and out["choices"]:
+            ch0 = out["choices"][0]
+            msg = ch0.get("message") if isinstance(ch0, dict) else None
+            return msg if isinstance(msg, dict) else {}
+        return {}
 
     try:
-        reply = data["choices"][0]["message"]["content"]
-        return {"ok": True, "reply": str(reply), "raw": data}
+        async with httpx.AsyncClient(timeout=timeout) as client:
+            r = await client.post(url, json=payload, headers=headers)
+            r.raise_for_status()
+            data = r.json()
+    except httpx.TimeoutException as e:
+        return {"ok": False, "error": f"LLM 请求超时: {str(e)}", "raw": {}}
+    except httpx.HTTPStatusError as e:
+        # DashScope 某些环境可能不支持 response_format，兜底重试一次（仅 json_mode）
+        if json_mode and is_dashscope:
+            try:
+                payload2 = dict(payload)
+                payload2.pop("response_format", None)
+                payload2["result_format"] = "message"
+                payload2["tools"] = [
+                    {
+                        "type": "function",
+                        "function": {
+                            "name": "json_response",
+                            "description": "返回JSON格式的响应",
+                            "parameters": {
+                                "type": "object",
+                                "properties": {
+                                    "type": {"type": "string"},
+                                    "reply": {"type": "string"},
+                                    "toolCalls": {"type": "array"},
+                                    "tool_calls": {"type": "array"},
+                                },
+                            },
+                        },
+                    }
+                ]
+                async with httpx.AsyncClient(timeout=timeout) as client:
+                    r2 = await client.post(url, json=payload2, headers=headers)
+                    r2.raise_for_status()
+                    data = r2.json()
+            except Exception as e2:
+                return {"ok": False, "error": f"LLM 请求异常: {str(e2)}", "raw": {}}
+        else:
+            try:
+                detail = e.response.text
+            except Exception:
+                detail = str(e)
+            return {"ok": False, "error": f"LLM 请求异常: {detail}", "raw": {}}
+    except Exception as e:
+        return {"ok": False, "error": f"LLM 请求异常: {str(e)}", "raw": {}}
+
+    try:
+        msg = _extract_openai_like_message(data)
+        content = str(msg.get("content") or "")
+        if content.strip():
+            return {"ok": True, "reply": content, "raw": data}
+
+        # 某些 JSON/函数调用模式会把结果塞到 tool_calls 里
+        tool_calls = msg.get("tool_calls") or msg.get("toolCalls")
+        if isinstance(tool_calls, list) and tool_calls:
+            tc0 = tool_calls[0] if isinstance(tool_calls[0], dict) else {}
+            fn = tc0.get("function") if isinstance(tc0, dict) else None
+            if isinstance(fn, dict):
+                args = fn.get("arguments")
+                if isinstance(args, str) and args.strip():
+                    return {"ok": True, "reply": args, "raw": data}
+
+        # 兜底：有些实现可能直接给 output_text
+        out_text = data.get("output_text")
+        if isinstance(out_text, str) and out_text.strip():
+            return {"ok": True, "reply": out_text, "raw": data}
+
+        return {"ok": False, "error": "empty llm reply", "raw": data}
     except Exception:
         return {"ok": False, "error": "invalid llm response", "raw": data}
+
 
 
 def heuristic_tool_calls(message: str) -> List[Any]:

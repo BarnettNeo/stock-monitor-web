@@ -13,14 +13,11 @@ from core.config import (
     _port,
     _sanitize_model,
 )
-# from database import db_manager  # 暂时禁用PostgreSQL
 from llm.langchain_integration import langchain_agent
 from llm.llm import build_decision_prompt, call_openai_compatible, extract_json_object, heuristic_tool_calls
 from infrastructure.memory import memory
 from core.models import AgentChatRequest, AgentChatResponse
-from domain.notifications import notification_manager
 from domain.strategy import handle_create_strategy_flow, looks_like_create_strategy
-# from tasks import send_notification_async  # 暂时禁用Celery
 from llm.tools import format_tool_results, parse_final_reply_from_llm_response, parse_tool_calls_from_llm_response
 
 @asynccontextmanager
@@ -58,29 +55,6 @@ def health() -> Dict[str, Any]:
     }
 
 
-@app.post("/notifications/subscribe")
-async def subscribe_notification(user_id: str, notifier_type: str, webhook_url: str, secret: str = None):
-    """订阅通知"""
-    try:
-        if notifier_type == "dingtalk":
-            notification_manager.register_dingtalk(user_id, webhook_url, secret)
-        elif notifier_type == "wechat":
-            notification_manager.register_wechat_work(user_id, webhook_url)
-        else:
-            return {"ok": False, "error": "不支持的通知类型"}
-        
-        return {"ok": True, "message": f"{notifier_type} 通知订阅成功"}
-    except Exception as e:
-        return {"ok": False, "error": str(e)}
-
-
-@app.post("/notifications/test")
-async def test_notification(user_id: str, message: str = "这是一条测试消息"):
-    """测试通知发送"""
-    result = await notification_manager.send_notification(user_id, message)
-    return result
-
-
 @app.get("/tools")
 def get_available_tools():
     """获取可用工具列表"""
@@ -110,6 +84,7 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
     req_model = _sanitize_model((payload.context or {}).get("model") if isinstance(payload.context, dict) else None)
 
     history = await memory.load(user_id)
+    print(f"history: {history}")
 
     # 1) 若已经有 toolResults：直接让 LLM 基于工具结果生成最终回复
     if tool_results:
@@ -138,6 +113,7 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
             await memory.append(user_id, {"role": "assistant", "content": reply})
 
         cfg = _llm_config()
+        print(f"LLM: {reply}")
         return AgentChatResponse(
             reply=reply,
             toolCalls=[],

@@ -155,6 +155,38 @@ export async function fetchStockDataBatch(codes: string[]): Promise<StockData[]>
   return results;
 }
 
+// 根据股票名称（中文）尝试解析为新浪查询代码（例如："贵州茅台" -> "sh600519"）
+export async function resolveSinaCodeByName(query: string): Promise<string | null> {
+  const q = String(query || '').trim();
+  if (!q) return null;
+
+  const url = `https://suggest3.sinajs.cn/suggest/type=11,12&key=${encodeURIComponent(q)}`;
+  const resp = await axios.get(url, {
+    timeout: 5000,
+    headers: {
+      Referer: 'https://finance.sina.com.cn/',
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+    },
+  });
+
+  const text = String(resp.data || '');
+  const m = text.match(/suggestvalue="([^"]*)"/);
+  if (!m || !m[1]) return null;
+
+  const rows = m[1]
+    .split(';')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  if (!rows.length) return null;
+
+  // 每行：name,type,code,symbol,... 其中 symbol 类似 sh600519
+  const parsed = rows.map((r) => r.split(','));
+  const exact = parsed.find((f) => String(f?.[0] || '').trim() === q && f?.[3]);
+  const pick = (exact || parsed.find((f) => f?.[3]) || [])[3];
+  if (!pick) return null;
+  return String(pick).trim().toLowerCase();
+}
+
 // 获取历史收盘价
 async function fetchHistoryCloses(code: string, period: string = '1'): Promise<number[]> {
   const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${code}&scale=${period}&datalen=240`;
