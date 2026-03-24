@@ -4,7 +4,7 @@
       <!-- 悬浮按钮 -->
       <div v-if="!open" class="agent-float-btn" @click="open = true">
         <el-icon size="20"><ChatDotRound /></el-icon>
-        <span class="agent-float-btn-text">AI</span>
+        <span class="agent-float-btn-text">AI 助手</span>
       </div>
 
       <!-- 悬浮窗口 -->
@@ -74,7 +74,7 @@ type Msg = { role: MsgRole; content: string; ts: number };
 
 const STORAGE_MODEL_KEY = 'agent_llm_model';
 
-const open = ref(true);
+const open = ref(false);
 
 const draft = ref('');
 const sending = ref(false);
