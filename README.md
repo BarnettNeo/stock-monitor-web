@@ -1,216 +1,146 @@
-# 📈 智能股票量化监控WEB系统 (Smart Stock Quant Monitor)
-一个基于 **Vue3 + Node.js + TypeScript** 的轻量级股票监控与推送系统。
+# 📈 股票监控AI助手 (Stock Monitor Agents)
+由原轻量级股票监控与推送系统升级改造：
+- 原分支：main
+- 地址：https://github.com/BarnettNeo/stock-monitor-web/tree/main
 
-由node工具迁入，功能更完善，新增WEB管理界面：
-- node版本：https://github.com/BarnettNeo/stock-monitor
+## 🚀 核心升级
 
-项目由两部分组成：
+### 技术栈升级
+- **大模型**: 通义千问Qwen3-Max，可选模型等
+- **Agent框架**: LangChain 2026 + ReAct模式
+- **记忆存储**: Redis / 内存级状态管理
+- **架构解耦**: 数据库(SQLite)、定时任务(Scheduler)和消息通知(钉钉/企业微信)已完全下沉至 Node.js 服务端，Python层专注作为「自然语言意图编排网关」。
 
-- **server**：策略执行引擎 + REST API + 定时扫描 + 推送 + MySQL 持久化
-- **admin**：Web 管理后台（策略/订阅/触发日志）
+### 功能扩展
+- ✅ **8个用户意图支持**
+- ✅ **中文自然语言理解优化**
+- ✅ **ReAct模式工具调用**
+- ✅ **轻量级编排网关层设计**
 
-> 数据来自公开行情接口；系统输出仅供学习与技术交流，不构成投资建议。
+## 📋 支持的用户意图
 
-## 🚀 核心能力
+| 用户意图 | 示例命令 | 调用工具 |
+|---------|---------|---------|
+| 创建策略 | "帮我监控贵州茅台, MACD金叉时提醒我" | `create_strategy` |
+| 查询策略 | "我现在有哪些监控策略?" | `list_strategies` |
+| 删除策略 | "删除茅台的监控策略" | `delete_strategy` |
+| 查询触发 | "今天有哪些股票触发了异动?" | `query_triggers` |
+| 查询详情 | "查看茅台最近的异动诊断" | `get_diagnostic` |
+| 订阅管理 | "帮我绑定钉钉推送地址" | `update_subscription` |
+| 市场查询 | "贵州茅台现在什么价格?" | `get_stock_info` |
+| 汇总报告 | "生成本周监控报告" | `generate_report` |
 
-- **策略管理**：新增/编辑/删除策略，配置监控股票与扫描间隔
-- **告警方式二选一**：
-  - **大幅异动监控（percent）**：按涨跌幅阈值触发
-  - **目标价触发（target）**：按“涨幅至目标价 / 跌幅至目标价”触发（启用后会忽略涨跌幅阈值）
-- **技术指标触发**：MACD / RSI / 均线趋势
-- **形态信号**：突破回踩 / 破位反抽（由后端形态识别模块生成）
-- **推送订阅**：支持钉钉机器人、企业微信机器人（以及企业微信应用预留类型）
-- **触发日志**：记录每次触发原因、快照、发送状态与错误，便于回溯“为什么触发”
-- **冷却机制**：同一策略对同一股票同一原因，在冷却时间内不重复推送
+## 🏗️ 架构设计
 
-## 🤖 AI 助手（Agent）
-
-管理后台右下角提供 `AI` 悬浮窗，可通过自然语言驱动后端工具（经由 `/api/agent/chat`）完成常见操作。
-
-当前支持 8 个工具能力（工具名仅用于文档说明，前端输入用自然语言即可）：
-
-- `list_strategies`：列出策略
-- `create_strategy`：新增策略
-- `delete_strategy`：删除策略
-- `query_triggers`：查询触发记录（today/week/month）
-- `get_diagnostic`：获取单只股票近期诊断摘要
-- `update_subscription`：绑定/更新推送订阅（钉钉/企微/邮箱）
-- `get_stock_info`：查询实时价格/涨跌幅
-- `generate_report`：生成日报/周报/月报
-
-示例语句：
-
-- “列出我的策略”
-- “帮我新增一个监控贵州茅台的策略，阈值 2%”
-- “删除这条茅台的监控策略”
-- “今天有哪些股票触发了异动？”
-- “看看贵州茅台最近的异动诊断”
-- “帮我绑定钉钉推送，webhook 是 ...”
-- “贵州茅台现在什么价格？”
-- “生成本周监控报告”
-
-## 🛠️ 技术栈
-
-| 模块 | 技术选型 | 说明 |
-| --- | --- | --- |
-| 前端后台 | Vue 3 + Vite + Element Plus | 管理端页面 |
-| 后端服务 | Node.js + Express + TypeScript | REST API + scheduler |
-| 数据库 | MySQL | 统一持久化存储，支持索引与并发访问 |
-| 行情接口 | 新浪财经接口 | 批量报价、K线数据 |
-| 指标计算 | technicalindicators | MACD/RSI/SMA |
-
-## 📂 项目结构
-
+### 模块结构
 ```text
-stock-monitor-web/
-├── admin/                  # 管理后台（策略/订阅/触发日志）
-├── server/                 # 后端服务（API + 扫描调度 + 推送 + DB）
-├── src/                    # 旧版/实验代码（对照用，不影响 server/admin）
-├── package.json
-└── README.md
+agents/
+├── api (入口)
+│   └── main.py              # 主应用（FastAPI接口）
+├── core/
+│   ├── __init__.py
+│   ├── config.py            # 配置管理（环境变量、工具规格）
+│   └── models.py            # 数据模型（Pydantic模型）
+├── domain/
+│   ├── __init__.py
+│   └── strategy.py          # 策略处理（无LLM兜底创建流程）
+├── infrastructure/
+│   ├── __init__.py
+│   └── memory.py            # 内存管理（Redis/内存存储）
+└── llm/
+    ├── __init__.py
+    ├── langchain_integration.py # LangChain集成（ReAct模式）
+    ├── llm.py               # LLM处理（通义千问集成）
+    └── tools.py             # 工具处理（结果格式化）
 ```
 
-## ✅ 快速开始
+### ReAct模式
+采用Reasoning and Acting模式：
+1. **Thought（思考）**: 分析用户意图
+2. **Action（行动）**: 选择合适工具
+3. **Observation（观察）**: 分析工具结果
+4. **Answer（回答）**: 给出最终答案
 
-### 1) 启动后端（server）
+## 🔧 配置说明
 
-**先准备 MySQL**（后端依赖 `DB_*` 连接；若本机未装 MySQL，可用 Docker 一键启动，与默认 `.env` 一致）：
-
+### 环境变量
 ```bash
-# 在项目根目录 stock-monitor-web/
-docker compose -f docker-compose.mysql.yml up -d
+# LLM配置（通义千问）
+LLM_BASE_URL=https://dashscope.aliyuncs.com/compatible-mode
+LLM_API_KEY=your_qwen_api_key
+LLM_MODEL=qwen3-max
+
+# Redis配置
+REDIS_URL=redis://localhost:6379
+
+# 服务配置
+AGENTS_PORT=8008
+AGENTS_HISTORY_LIMIT=12
 ```
 
-然后：
+## 🚀 API接口
 
-```bash
-cd server
-yarn
-yarn dev
+### 健康检查
+```http
+GET /health
 ```
 
-默认地址：
+### 聊天接口
+```http
+POST /agent/chat
+Content-Type: application/json
 
-- API：`http://localhost:3001/api/*`
-- OpenAPI：`http://localhost:3001/openapi.json`
-- Swagger UI：`http://localhost:3001/api-docs`
-
-### 2) 启动前端（admin）
-
-```bash
-cd admin
-yarn
-yarn dev
+{
+    "message": "帮我监控贵州茅台",
+    "user": {"userId": "user123"},
+    "toolResults": []
+}
 ```
 
-访问：Vite 输出的本地地址（通常是 `http://localhost:5173`）。
+### 工具列表
+```http
+GET /tools
+```
 
-## ⚙️ 配置与环境变量（server）
+## 🎯 使用示例
 
-后端会读取项目根目录的 `.env`（`server/src/index.ts` 内通过相对路径加载）。常用参数：
+### 1. 创建监控策略
+用户输入：`"帮我监控贵州茅台，MACD金叉时提醒我"`
 
-- `PORT`：server 端口（默认 `3001`）
-- `SCAN_INTERVAL_MS`：scheduler 全局扫描间隔（默认 `15000`）
-- `DB_HOST` / `DB_PORT` / `DB_NAME` / `DB_USER` / `DB_PASSWORD`：MySQL 连接（Windows 上建议 `DB_HOST=127.0.0.1`，避免 `localhost` 解析到 `::1` 而本机 MySQL 未监听 IPv6）
+Agent处理：
+1. 提取股票代码：sh600519
+2. 识别技术指标：MACD金叉
+3. 判定工具调用意图为 `create_strategy`
+4. 返回给 Node.js 端执行落库并响应最终结果
 
-若启动时报 `ECONNREFUSED 127.0.0.1:3306`，说明 **3306 上没有 MySQL 在监听**：请先启动本机 MySQL 或使用上面的 `docker-compose.mysql.yml`。
+### 2. 绑定钉钉通知
+用户输入：`"帮我绑定钉钉推送"`
 
-说明：
+Agent处理：
+1. 识别订阅类型：dingtalk
+2. 判定工具调用意图为 `update_subscription`
+3. Node.js 端收到结果后将其落入 SQLite 库，并建立相应的发送通道
 
-- **策略自己的 `intervalMs`** 是策略字段，用于策略配置与展示；
-- **scheduler 的扫描频率** 由 `SCAN_INTERVAL_MS` 控制，每轮扫描会检查所有启用策略。
+## 🔮 未来规划
 
-## 💾 数据存储与迁移
+1. **更多技术指标扩展**: 在 LLM Prompt 层扩展对 RSI、KDJ、布林带等技术指标的识别支持。
+2. **智能推荐**: 基于对话历史动态挖掘并主动推荐策略配置。
+3. **多语言支持**: 英文、日文等。
 
-- 当前数据库：MySQL（连接配置使用根目录 `.env` 中 `DB_*` 变量）
-- 后端启动时会自动执行 MySQL `CREATE TABLE IF NOT EXISTS` 初始化
-- 若检测到旧数据文件 `server/data/db.sqlite`，后端会在首次启动时自动导入到 MySQL（一次性）
+## 📊 性能优化
 
-## 📊 策略说明
+- **架构瘦身**: 剔除了原有的 Celery、PostgreSQL 依赖，启动极速。
+- **异步处理**: FastAPI 原生支持异步高并发请求处理。
+- **缓存机制**: Redis缓存热点数据和对话历史。
 
-### 告警方式（二选一）
+## 🛠️ 开发指南
 
-- **大幅异动监控（percent）**
-  - 条件：`abs(changePercent) >= priceAlertPercent`
-- **目标价触发（target）**
-  - 条件：
-    - `currentPrice >= targetPriceUp` → `涨幅至目标价: xxx`
-    - `currentPrice <= targetPriceDown` → `跌幅至目标价: xxx`
-  - 备注：启用目标价触发后，后端会忽略 `priceAlertPercent`（确保二选一）
+### 添加新工具
+1. 在`core/config.py`的`TOOLS_SPEC`中添加工具定义
+2. 在`llm/tools.py`中添加工具调用的格式化逻辑
+3. 在`llm/llm.py`的`heuristic_tool_calls`中补充规则兜底逻辑
+4. 确保 Node.js 侧 (`server/src/tools/...`) 也同步实现了该工具的具体执行逻辑
 
-### 技术指标（开关可控）
+---
 
-- **MACD 金叉**：趋势信号（买入倾向）
-- **RSI 超卖/超买**：极值区间提醒
-- **均线趋势**：多头排列（趋势偏多）
-
-### 形态信号
-
-- **突破回踩 / 破位反抽**：从近段 K 线价格序列检测形态信号
-
-### 冷却机制
-
-- 同一策略对同一股票 + 同一原因，在 `cooldownMinutes` 内不重复推送
-
-## 📣 推送订阅（Subscriptions）
-
-策略可绑定 0~N 个订阅：
-
-- **绑定为空**：只记录触发日志，不推送
-- **绑定多个**：对每个订阅分别发送并分别记录结果（便于看各渠道发送状态）
-
-## 🧭 管理后台页面
-
-- **策略管理**：配置股票、告警方式、指标开关、绑定订阅
-- **订阅管理**：维护钉钉/企微等推送渠道
-- **触发日志**：查看触发原因、快照、发送结果与错误
-
-## 🖼️ 管理后台截图
-
-建议把截图放在：`asstes/images/`（与仓库中现有图片保持一致）。
-
-推荐命名：
-
-- `admin-strategies.png`：策略管理
-- `admin-subscriptions.png`：订阅管理
-- `admin-trigger-logs.png`：触发日志
-
-截图示例（将图片按上述命名放入目录后即可在 README 中展示）：
-
-### 策略管理
-
-![策略管理](./asstes/images/admin-strategies.png)
-
-### 订阅管理
-
-![订阅管理](./asstes/images/admin-subscriptions.png)
-
-### 触发日志
-
-![触发日志](./asstes/images/admin-trigger-logs.png)
-
-## � 主要 API（简表）
-
-- `GET /api/strategies`
-- `GET /api/strategies/:id`
-- `POST /api/strategies`
-- `PUT /api/strategies/:id`
-- `DELETE /api/strategies/:id`
-- `GET /api/subscriptions`
-- `POST /api/subscriptions`
-- `GET /api/trigger-logs`
-
-## 🧩 常见问题
-
-### 1) 看不到“告警方式/目标价字段”？
-
-- 重启 `server` 以执行数据库迁移（会自动补齐新字段）
-
-### 2) 行情接口偶发失败/超时
-
-- 公开接口存在波动，属于正常现象；可在日志中查看失败原因并重试
-
-## ⚠️ 免责声明
-
-本项目仅供技术交流与学习使用。所有行情数据来自公开互联网接口，系统生成的分析与推送不构成任何投资建议。
-股市有风险，入市需谨慎；使用本软件产生的任何风险或损失需自行承担。
+**兼容性**: Python 3.9+, FastAPI 0.104+
