@@ -5,7 +5,7 @@
 - node版本：https://github.com/BarnettNeo/stock-monitor
 
 ### 在线体验地址
-- URL：http://182.254.182.170/screen
+- 地址：http://182.254.182.170/screen
 
 
 项目由两部分组成：
@@ -14,6 +14,9 @@
 - **admin**：Web 管理后台（策略/订阅/触发日志）
 
 > 数据来自公开行情接口；系统输出仅供学习与技术交流，不构成投资建议。
+
+### 智能监控AI agent - 升级版（开发中）：
+- 地址：https://github.com/BarnettNeo/stock-monitor-agent
 
 ## 🚀 核心能力
 
