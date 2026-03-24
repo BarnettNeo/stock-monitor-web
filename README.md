@@ -16,7 +16,7 @@
 > 数据来自公开行情接口；系统输出仅供学习与技术交流，不构成投资建议。
 
 ### 智能监控AI agent - 升级版（开发中）：
-- 地址：https://github.com/BarnettNeo/stock-monitor-agent
+- 地址：https://github.com/BarnettNeo/stock-monitor-web/tree/main-agent
 
 ## 🚀 核心能力
 
