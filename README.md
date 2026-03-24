@@ -4,6 +4,10 @@
 由node工具迁入，功能更完善，新增WEB管理界面：
 - node版本：https://github.com/BarnettNeo/stock-monitor
 
+### 在线体验地址
+- URL：http://182.254.182.170/screen
+
+
 项目由两部分组成：
 
 - **server**：策略执行引擎 + REST API + 定时扫描 + 推送 + MySQL 持久化
@@ -22,32 +26,6 @@
 - **推送订阅**：支持钉钉机器人、企业微信机器人（以及企业微信应用预留类型）
 - **触发日志**：记录每次触发原因、快照、发送状态与错误，便于回溯“为什么触发”
 - **冷却机制**：同一策略对同一股票同一原因，在冷却时间内不重复推送
-
-## 🤖 AI 助手（Agent）
-
-管理后台右下角提供 `AI` 悬浮窗，可通过自然语言驱动后端工具（经由 `/api/agent/chat`）完成常见操作。
-
-当前支持 8 个工具能力（工具名仅用于文档说明，前端输入用自然语言即可）：
-
-- `list_strategies`：列出策略
-- `create_strategy`：新增策略
-- `delete_strategy`：删除策略
-- `query_triggers`：查询触发记录（today/week/month）
-- `get_diagnostic`：获取单只股票近期诊断摘要
-- `update_subscription`：绑定/更新推送订阅（钉钉/企微/邮箱）
-- `get_stock_info`：查询实时价格/涨跌幅
-- `generate_report`：生成日报/周报/月报
-
-示例语句：
-
-- “列出我的策略”
-- “帮我新增一个监控贵州茅台的策略，阈值 2%”
-- “删除这条茅台的监控策略”
-- “今天有哪些股票触发了异动？”
-- “看看贵州茅台最近的异动诊断”
-- “帮我绑定钉钉推送，webhook 是 ...”
-- “贵州茅台现在什么价格？”
-- “生成本周监控报告”
 
 ## 🛠️ 技术栈
 
@@ -177,6 +155,9 @@ yarn dev
 
 截图示例（将图片按上述命名放入目录后即可在 README 中展示）：
 
+### 监控大屏 
+![监控大屏 ](77c21cad69b4600dc406dd73787a52fa.png)
+
 ### 策略管理
 
 ![策略管理](./asstes/images/admin-strategies.png)
@@ -199,6 +180,22 @@ yarn dev
 - `GET /api/subscriptions`
 - `POST /api/subscriptions`
 - `GET /api/trigger-logs`
+
+## 二阶段计划： 
+- 当前项目分支：main-agent
+- 地址：https://github.com/BarnettNeo/stock-monitor-web/tree/main-agent
+- 数据流说明
+![alt text](./asstes/images/data-flow.png)
+### 1) AI agent核心引擎
+- LLM大脑 (Qwen3)：理解用户意图，决策调用工具
+- 工具库：策略管理、触发查询、诊断查看等8大工具
+- 记忆系统 (Redis)：保存对话历史，实现上下文理解
+
+### 2) RAG知识库
+- 新闻采集器：实时抓取财经新闻
+- 向量数据库 (ChromaDB)：存储和检索相关新闻
+- AI分析引擎：异动归因分析，生成诊断报告
+
 
 ## 🧩 常见问题
 
