@@ -65,7 +65,7 @@ def normalize_symbol(sym: str) -> Optional[str]:
 
 
 def extract_symbols_from_text(text: str) -> List[str]:
-    """从文本中提取股票代码"""
+    """从文本中提取股票代码（仅代码，不含中文名）"""
     t = (text or "").lower()
     out: List[str] = []
 
@@ -84,6 +84,63 @@ def extract_symbols_from_text(text: str) -> List[str]:
             out.append(n)
 
     return out
+
+
+_STOCK_NAME_STOPWORDS = {
+    "股票",
+    "股价",
+    "价格",
+    "现在",
+    "当前",
+    "多少",
+    "多少钱",
+    "是多少",
+    "涨跌",
+    "涨幅",
+    "跌幅",
+    "查询",
+    "查一下",
+    "帮我",
+    "一下",
+    "请问",
+    "麻烦",
+    "的",
+    "呢",
+    "啊",
+}
+
+
+def extract_stock_names_from_text(text: str) -> List[str]:
+    """从文本中提取中文股票名称（用于行情查询工具兜底）。
+
+    注意：此函数只做轻量启发式抽取，不保证 100% 准确。
+    """
+    t = (text or "").strip()
+    if not t:
+        return []
+
+    # 先移除可能的代码/数字，减少干扰
+    t2 = re.sub(r"(?:sh|sz)\d{6}", " ", t, flags=re.IGNORECASE)
+    t2 = re.sub(r"(?<!\d)\d{6}(?!\d)", " ", t2)
+
+    # 抽取 2~8 个连续中文字符作为候选
+    candidates = re.findall(r"[\u4e00-\u9fff]{2,8}", t2)
+
+    out: List[str] = []
+    for c in candidates:
+        s = c.strip()
+        if not s:
+            continue
+        # 排除包含通用询问词的片段
+        if any(k in s for k in ["股价", "价格", "现在", "当前", "涨跌", "涨幅", "跌幅", "多少", "查询"]):
+            continue
+        if s in _STOCK_NAME_STOPWORDS:
+            continue
+        if s not in out:
+            out.append(s)
+
+    return out
+
 
 
 def extract_percent_from_text(text: str) -> Optional[float]:

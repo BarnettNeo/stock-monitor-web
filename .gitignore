@@ -31,3 +31,4 @@ openspec/*.log
 .trae/state.json
 
 docs/
+*.log

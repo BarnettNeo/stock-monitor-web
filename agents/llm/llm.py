@@ -249,10 +249,18 @@ def heuristic_tool_calls(message: str) -> List[Any]:
 
     # 7. 查询股价信息
     if any(x in m for x in ["价格", "多少钱", "股价", "现在", "当前", "涨跌"]):
-        from domain.strategy import extract_symbols_from_text
+        from domain.strategy import extract_symbols_from_text, extract_stock_names_from_text
+
+        # 优先提取明确的股票代码
         codes = extract_symbols_from_text(m)
         if codes:
             return [ToolCall(id="t1", name="get_stock_info", arguments={"symbols": codes})]
+
+        # 兜底：仅给了中文名称（例如：洲际油气）
+        names = extract_stock_names_from_text(m)
+        if names:
+            return [ToolCall(id="t1", name="get_stock_info", arguments={"symbols": names})]
+
 
     # 8. 生成报告
     if any(x in m for x in ["报告", "汇总", "总结", "周报", "月报", "日报"]):

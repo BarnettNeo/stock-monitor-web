@@ -610,15 +610,27 @@ async function toolGetStockInfo(user: AuthedUser, args: unknown): Promise<any> {
     return raw;
   });
 
-  const stocks = await fetchStockDataBatch(codes);
+  const validCodes = codes.filter((c) => /^(sh|sz)\d{6}$/i.test(String(c || '').trim()));
+  const unresolved = normalized.filter((_, idx) => !/^(sh|sz)\d{6}$/i.test(String(codes[idx] || '').trim()));
+
+  if (!validCodes.length) {
+    throw new Error(
+      `无法解析股票代码，请输入如 sh600519 / 600519，或可被识别的中文股票名称。未解析项：${unresolved.join(',')}`,
+    );
+  }
+
+  const stocks = await fetchStockDataBatch(validCodes);
   return {
     stocks: stocks.map((s: any) => ({
       symbol: String(s.code || '').toLowerCase(),
+      name: s.name,
       price: s.currentPrice,
       change: s.changePrice,
       changePercent: s.changePercent,
     })),
+    unresolved,
   };
+
 }
 
 // 生成报告工具（简版统计）
@@ -732,7 +744,6 @@ export function registerAgentRoutes(app: Express): void {
     if (!message) return res.status(400).json({ message: 'message 不能为空' });
 
     const baseUrl = getAgentsBaseUrl();
-    console.log('baseUrl', baseUrl)
 
     const basePayload = {
       message,
@@ -755,7 +766,6 @@ export function registerAgentRoutes(app: Express): void {
           },
           { timeout: 60000 },
         );
-        console.log('rrrrr', r)
         const data = r.data || {};
         const toolCalls: ToolCall[] = Array.isArray(data.toolCalls) ? data.toolCalls : [];
 
