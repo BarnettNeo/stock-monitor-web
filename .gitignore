@@ -29,3 +29,5 @@ openspec/*.log
 .trae/settings.json
 .trae/user-config/
 .trae/state.json
+
+docs/
