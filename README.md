@@ -61,6 +61,41 @@ agents/
 3. **Observation（观察）**: 分析工具结果
 4. **Answer（回答）**: 给出最终答案
 
+### 数据流全链路说明图
+
+```text
+【交互链路（同步，多轮编排）】
+用户输入
+  → 管理后台 Web（admin）
+  → Node 网关（server）/api/agent/chat + JWT
+  → Python Agents（agents）/agent/chat
+  → LLM 决策（final 或 tool_calls）
+                    ↓
+               toolCalls（8 工具）
+                    ↓
+Node 受控工具执行器（server/routes/agent-routes.ts）
+  → MySQL（策略/订阅/触发日志）
+  → 外部行情接口（Sina 等）
+  → 推送渠道（钉钉/企微）
+                    ↑
+               toolResults（结果回传）
+                    ↑
+Python Agents 汇总生成最终回复（reply）
+  → Node 网关（server）
+  → 管理后台 Web（admin）
+  → 用户看到回复
+
+【监控闭环（异步，定时扫描）】
+Scheduler（server/scheduler.ts）
+  → 读取启用策略/订阅（MySQL）
+  → 拉行情 + 计算指标（engine.ts）
+  → 触发事件（TriggerEvent）
+  → 发送推送（notify.ts）
+  → 写入触发日志（trigger_logs：SENT/FAILED/NO_SUBSCRIPTION）
+  → 后台页面回看（/api/trigger-logs）
+```
+
+
 ## 🔧 配置说明
 
 ### 环境变量
