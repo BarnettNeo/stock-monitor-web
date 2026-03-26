@@ -17,7 +17,7 @@ from llm.langchain_integration import langchain_agent
 from llm.llm import build_decision_prompt, call_openai_compatible, extract_json_object, heuristic_tool_calls
 from infrastructure.memory import memory
 from core.models import AgentChatRequest, AgentChatResponse
-from domain.strategy import handle_create_strategy_flow, looks_like_create_strategy
+
 from llm.tools import format_tool_results, parse_final_reply_from_llm_response, parse_tool_calls_from_llm_response
 
 @asynccontextmanager
@@ -139,19 +139,33 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
     if user_id:
         await memory.append(user_id, {"role": "user", "content": message})
 
-    # 无 LLM 时，先用规则兜底出 toolCalls
     cfg = _llm_config()
+    state = await memory.load_state(user_id) if user_id else {}
 
+    # 优先执行 skill 业务流（例如：策略管理 skill 直连后端 CRUD API）
+    from skills.router import select_skill
+
+    skill = select_skill(message, state if isinstance(state, dict) else {})
+    auth_info = payload.auth if isinstance(payload.auth, dict) else {}
+    print(f"当前 skill", skill)
+    if skill and skill.executor == "strategy_management":
+        from skills.strategy_management import handle_strategy_management_skill
+
+        return await handle_strategy_management_skill(
+            user_id=user_id,
+            current_user=payload.user or {},
+            auth=auth_info,
+            message=message,
+            req_model=req_model,
+            cfg_ok=bool(cfg.get("base_url") and cfg.get("api_key")),
+        )
+
+    # 无 LLM 时，先用规则兜底出 toolCalls
     if not (cfg.get("base_url") and cfg.get("api_key")):
-        print(f"no LLM")
-        # 创建策略：即使无 LLM 也尽量做缺参追问/规则抽取
-        state = await memory.load_state(user_id) if user_id else {}
-        pending = state.get("pending") if isinstance(state, dict) else None
-        has_pending_create = bool(isinstance(pending, dict) and pending.get("type") == "create_strategy")
-        if has_pending_create or looks_like_create_strategy(message):
-            return await handle_create_strategy_flow(user_id=user_id, message=message, req_model=req_model, cfg_ok=False)
 
+        print(f"no LLM")
         calls = heuristic_tool_calls(message)
+
         if calls:
             return AgentChatResponse(reply="", toolCalls=calls, meta={"mode": "no-llm", "decision": "tool_calls"})
         return AgentChatResponse(
@@ -160,23 +174,18 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
             meta={"mode": "no-llm", "decision": "final"},
         )
 
-    # 创建策略：走"字段抽取 + 缺参追问 + 补齐后再创建"的专用流程
-    state = await memory.load_state(user_id) if user_id else {}
-    pending = state.get("pending") if isinstance(state, dict) else None
-    has_pending_create: bool = bool(isinstance(pending, dict) and pending.get("type") == "create_strategy")
-    if has_pending_create or looks_like_create_strategy(message):
-        return await handle_create_strategy_flow(user_id=user_id, message=message, req_model=req_model, cfg_ok=True)
-
     # 有 LLM：用 JSON decision（按 skill 注入最小工具集合以节省 token）
-    from skills.router import select_skill
+
     from skills.specs import compact_tools_spec
 
-    skill = select_skill(message, state if isinstance(state, dict) else {})
+
+
+
     tools_override = None
     skill_hint = ""
 
-    # create_strategy 走专用流程，不在这里走 decision
-    if skill and skill.tool_name and skill.tool_name != "create_strategy":
+    if skill and skill.tool_name:
+
         tools_override = compact_tools_spec([skill.tool_name])
         skill_hint = f"当前 skill：{skill.name}。{skill.hint}".strip()
 

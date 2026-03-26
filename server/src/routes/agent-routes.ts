@@ -7,7 +7,7 @@ import { z } from 'zod';
 import type { AuthedUser } from '../auth';
 import { requireAuth } from '../auth';
 import { execute, query, queryOne } from '../db';
-import { rowToStrategy } from '../mappers';
+
 import {
   addClause,
   addDatePrefixRange,
@@ -41,44 +41,7 @@ function getAgentsBaseUrl(): string {
   return raw.replace(/\/$/, '');
 }
 
-// 工具接口类型
-const ListStrategiesArgsSchema = z.object({
-  name: z.string().optional(),
-  enabledOnly: z.boolean().optional(),
-  limit: z.number().int().min(1).max(50).optional(),
-});
 
-// 工具接口类型
-const CreateStrategyArgsSchema = z.object({
-  name: z.string().min(1),
-  symbols: z.union([z.string().min(1), z.array(z.string().min(1))]),
-
-  enabled: z.boolean().optional().default(true),
-  marketTimeOnly: z.boolean().optional().default(true),
-
-  alertMode: z.enum(['percent', 'target']).optional().default('percent'),
-  priceAlertPercent: z.number().min(0.1).optional().default(2),
-  targetPriceUp: z.number().positive().optional(),
-  targetPriceDown: z.number().positive().optional(),
-
-  intervalMinutes: z.number().int().min(1).optional().default(1),
-  cooldownMinutes: z.number().int().min(1).optional().default(60),
-
-  subscriptionIds: z.array(z.string()).optional().default([]),
-
-  enableMacdGoldenCross: z.boolean().optional().default(true),
-  enableRsiOversold: z.boolean().optional().default(true),
-  enableRsiOverbought: z.boolean().optional().default(true),
-  enableMovingAverages: z.boolean().optional().default(false),
-  enablePatternSignal: z.boolean().optional().default(true),
-});
-
-const DeleteStrategyArgsSchema = z.object({
-  strategyId: z.string().min(1).optional(),
-  // 兜底：允许通过 symbols/name 辅助匹配，但推荐优先使用 strategyId
-  symbols: z.union([z.string().min(1), z.array(z.string().min(1))]).optional(),
-  name: z.string().optional(),
-});
 
 const QueryTriggersArgsSchema = z.object({
   dateRange: z.enum(['today', 'week', 'month']).optional().default('today'),
@@ -110,13 +73,7 @@ const GenerateReportArgsSchema = z.object({
   format: z.enum(['text', 'json', 'html']).optional().default('text'),
 });
 
-function normalizeSymbols(input: string | string[]): string {
-  const arr = Array.isArray(input) ? input : String(input).split(',');
-  return arr
-    .map((x) => String(x).trim())
-    .filter(Boolean)
-    .join(',');
-}
+
 
 function normalizeSymbolList(input: string | string[]): string[] {
   const arr = Array.isArray(input) ? input : String(input).split(',');
@@ -161,171 +118,7 @@ function calcDateRangeForReport(reportType: 'daily' | 'weekly' | 'monthly'): { s
   return { startDate: dateStr(d), endDate: dateStr(today) };
 }
 
-// 策略列表
-async function toolListStrategies(user: AuthedUser, args: unknown): Promise<any> {
-  const parsed = ListStrategiesArgsSchema.parse(args || {});
-  const limit = parsed.limit ?? 20;
-  // 更稳妥：非管理员只返回自己的策略，避免数据泄露
-  const where = createWhereBuilder();
-  if (user.role !== 'admin') {
-    addClause(where, 'user_id = ?', user.userId);
-  }
-  if (parsed.name) {
-    addClause(where, 'name LIKE ?', `%${parsed.name}%`);
-  }
-  if (parsed.enabledOnly) {
-    addClause(where, 'enabled = 1');
-  }
-  const { whereSql, params } = toWhereSql(where);
-  const rows = await query<any>(
-    `SELECT * FROM strategies ${whereSql} ORDER BY updated_at DESC LIMIT ?`,
-    [...params, limit],
-  );
-  const items = rows.map((row) => rowToStrategy(row));
 
-  // 返回字段尽量精简，避免 prompt 过大
-  return {
-    count: items.length,
-    items: items.map((s) => ({
-      id: s.id,
-      name: s.name,
-      enabled: s.enabled,
-      symbols: s.symbols,
-      alertMode: s.alertMode,
-      priceAlertPercent: s.priceAlertPercent,
-      targetPriceUp: s.targetPriceUp,
-      targetPriceDown: s.targetPriceDown,
-      intervalMs: s.intervalMs,
-      cooldownMinutes: s.cooldownMinutes,
-    })),
-  };
-}
-
-// 创建策略工具
-async function toolCreateStrategy(user: AuthedUser, args: unknown): Promise<any> {
-  const parsed = CreateStrategyArgsSchema.parse(args || {});
-  const symbols = normalizeSymbols(parsed.symbols);
-  if (!symbols) {
-    throw new Error('symbols 不能为空，请提供如 sh600519,sz000001');
-  }
-
-  const id = crypto.randomUUID();
-  const ts = nowIso();
-
-  const alertMode = parsed.alertMode;
-  const intervalMs = parsed.intervalMinutes * 60_000;
-
-  // DB schema: price_alert_percent NOT NULL
-  const priceAlertPercent = typeof parsed.priceAlertPercent === 'number' ? parsed.priceAlertPercent : 2;
-
-  const subscriptionIdsJson = parsed.subscriptionIds && parsed.subscriptionIds.length > 0
-    ? JSON.stringify(parsed.subscriptionIds)
-    : null;
-
-  await execute(
-    `INSERT INTO strategies (
-      id,user_id,name,enabled,symbols,market_time_only,alert_mode,target_price_up,target_price_down,interval_ms,cooldown_minutes,price_alert_percent,
-      enable_macd_golden_cross,enable_rsi_oversold,enable_rsi_overbought,enable_moving_averages,enable_pattern_signal,
-      subscription_ids_json,created_at,updated_at
-    ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
-    [
-      id,
-      user.userId,
-      parsed.name,
-      boolToInt(parsed.enabled),
-      symbols,
-      boolToInt(parsed.marketTimeOnly !== false),
-      alertMode,
-      alertMode === 'target' ? (parsed.targetPriceUp ?? null) : null,
-      alertMode === 'target' ? (parsed.targetPriceDown ?? null) : null,
-      intervalMs,
-      parsed.cooldownMinutes,
-      priceAlertPercent,
-      boolToInt(parsed.enableMacdGoldenCross),
-      boolToInt(parsed.enableRsiOversold),
-      boolToInt(parsed.enableRsiOverbought),
-      boolToInt(parsed.enableMovingAverages),
-      boolToInt(parsed.enablePatternSignal),
-      subscriptionIdsJson,
-      ts,
-      ts,
-    ],
-  );
-
-  return {
-    id,
-    name: parsed.name,
-    symbols,
-    enabled: parsed.enabled,
-    alertMode,
-    intervalMs,
-    cooldownMinutes: parsed.cooldownMinutes,
-  };
-}
-
-// 删除策略工具
-async function toolDeleteStrategy(user: AuthedUser, args: unknown): Promise<any> {
-  const parsed = DeleteStrategyArgsSchema.parse(args || {});
-
-  // 优先按 strategyId 精确删除
-  if (parsed.strategyId) {
-    const row = await queryOne<any>('SELECT * FROM strategies WHERE id = ? LIMIT 1', [
-      parsed.strategyId,
-    ]);
-    if (!row) {
-      throw new Error('策略不存在');
-    }
-    const ownerId = (row as any).user_id ? String((row as any).user_id) : '';
-    if (user.role !== 'admin' && ownerId !== user.userId) {
-      throw new Error('无权限删除该策略');
-    }
-    const strategy = rowToStrategy(row);
-    await execute('DELETE FROM strategies WHERE id = ?', [parsed.strategyId]);
-    return {
-      id: strategy.id,
-      name: strategy.name,
-      symbols: strategy.symbols,
-    };
-  }
-
-  // 安全护栏：缺少精确条件时拒绝删除，避免误删
-  if (!parsed.symbols && !parsed.name) {
-    throw new Error('删除策略需要 strategyId，或至少提供 symbols/name 以避免误删');
-  }
-
-  // 兜底：根据 symbols/name 做宽松匹配，最多删除一条，避免误删
-  const where = createWhereBuilder();
-  if (user.role !== 'admin') {
-    addClause(where, 'user_id = ?', user.userId);
-  }
-  if (parsed.symbols) {
-    const symbolsStr = Array.isArray(parsed.symbols)
-      ? parsed.symbols.join(',')
-      : String(parsed.symbols);
-    addClause(where, 'symbols LIKE ?', `%${symbolsStr.split(',')[0].trim()}%`);
-  }
-  if (parsed.name) {
-    addClause(where, 'name LIKE ?', `%${parsed.name}%`);
-  }
-  const { whereSql, params } = toWhereSql(where);
-
-  const row = await queryOne<any>(
-    `SELECT * FROM strategies ${whereSql} ORDER BY updated_at DESC LIMIT 1`,
-    params,
-  );
-
-  if (!row) {
-    throw new Error('未找到可删除的策略，请提供更准确的策略ID或名称');
-  }
-
-  const strategy = rowToStrategy(row);
-  await execute('DELETE FROM strategies WHERE id = ?', [strategy.id]);
-  return {
-    id: strategy.id,
-    name: strategy.name,
-    symbols: strategy.symbols,
-  };
-}
 
 // 查询触发记录工具（简版统计）
 async function toolQueryTriggers(user: AuthedUser, args: unknown): Promise<any> {
@@ -691,18 +484,7 @@ async function executeToolCall(user: AuthedUser, call: ToolCall): Promise<ToolRe
 
   try {
     switch (name) {
-      case 'list_strategies': {
-        const result = await toolListStrategies(user, args);
-        return { id, name, ok: true, result };
-      }
-      case 'create_strategy': {
-        const result = await toolCreateStrategy(user, args);
-        return { id, name, ok: true, result };
-      }
-      case 'delete_strategy': {
-        const result = await toolDeleteStrategy(user, args);
-        return { id, name, ok: true, result };
-      }
+
       case 'query_triggers': {
         const result = await toolQueryTriggers(user, args);
         return { id, name, ok: true, result };

@@ -33,23 +33,8 @@ def compact_tool_results_for_prompt(tool_results: List[ToolResult]) -> List[Dict
         r = tr.result
 
         # Keep per-tool small, stable summaries
-        if tr.name == "list_strategies" and isinstance(r, dict):
-            items = r.get("items")
-            item["result"] = {
-                "count": r.get("count") if "count" in r else (len(items) if isinstance(items, list) else None),
-                "items": [
-                    {
-                        "id": (x or {}).get("id"),
-                        "name": (x or {}).get("name"),
-                        "enabled": (x or {}).get("enabled"),
-                        "symbols": (x or {}).get("symbols"),
-                    }
-                    for x in (items[:10] if isinstance(items, list) else [])
-                    if isinstance(x, dict)
-                ],
-            }
+        if tr.name == "query_triggers" and isinstance(r, dict):
 
-        elif tr.name == "query_triggers" and isinstance(r, dict):
             triggers = r.get("triggers")
             item["result"] = {
                 "count": r.get("count") if "count" in r else (len(triggers) if isinstance(triggers, list) else None),
@@ -77,7 +62,8 @@ def compact_tool_results_for_prompt(tool_results: List[ToolResult]) -> List[Dict
         elif tr.name == "generate_report" and isinstance(r, dict):
             item["result"] = {"reportType": r.get("reportType"), "summary": r.get("summary")}
 
-        elif tr.name in ("create_strategy", "delete_strategy", "update_subscription") and isinstance(r, dict):
+        elif tr.name == "update_subscription" and isinstance(r, dict):
+
             item["result"] = r
 
         else:

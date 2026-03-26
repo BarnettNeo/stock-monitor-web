@@ -71,7 +71,13 @@ def _port() -> int:
         return 8009
 
 
+def _server_base_url() -> str:
+    """后端 server 基础地址，供 skill 直连统一 API 网关。"""
+    return _env("SERVER_BASE_URL", _env("BACKEND_BASE_URL", "http://127.0.0.1:3001")).rstrip("/")
+
+
 # 系统提示词 - 优化中文自然语言理解
+
 SYSTEM_PROMPT = (
     "你是股票监控AI助手，专门帮助用户管理股票监控策略和分析市场异动。\n"
     "核心能力：\n"
@@ -89,49 +95,7 @@ SYSTEM_PROMPT = (
 
 # 工具规格定义 - 支持8个用户意图
 TOOLS_SPEC = [
-    {
-        "name": "list_strategies",
-        "description": "获取当前用户的策略列表（只读）",
-        "args": {
-            "name": "可选，按名称模糊过滤",
-            "enabledOnly": "可选，true=只返回启用策略",
-            "limit": "可选，返回数量（1~50）",
-        },
-    },
-    {
-        "name": "create_strategy",
-        "description": "创建一条监控策略（写入）",
-        "args": {
-            "name": "策略名称（必填；未给时你可以合理生成）",
-            "symbols": "股票代码，字符串或数组，例如 'sh600519,sz000001' 或 ['sh600519']（必填）",
-            "enabled": "可选，默认 true",
-            "marketTimeOnly": "可选，仅交易时间监控（默认 true）",
-            "subscriptionIds": "可选，订阅ID数组（默认 []）",
 
-            "alertMode": "可选，'percent' 或 'target'（默认 percent）",
-            "priceAlertPercent": "可选，percent 模式下的阈值（单位：百分比数字，例如 2 表示 2%）",
-            "targetPriceUp": "可选，target 模式上行目标价（数字）",
-            "targetPriceDown": "可选，target 模式下行目标价（数字）",
-
-            "intervalMinutes": "可选，扫描间隔分钟（默认 1）",
-            "cooldownMinutes": "可选，冷却分钟（默认 60）",
-
-            "enableMacdGoldenCross": "可选，默认 true",
-            "enableRsiOversold": "可选，默认 true",
-            "enableRsiOverbought": "可选，默认 true",
-            "enableMovingAverages": "可选，默认 false",
-            "enablePatternSignal": "可选，默认 true",
-        },
-    },
-    {
-        "name": "delete_strategy",
-        "description": "删除指定的监控策略",
-        "args": {
-            "strategyId": "可选，策略ID（推荐；精确删除）",
-            "symbols": "可选，股票代码（逗号分隔字符串或数组，用于辅助定位；谨慎使用）",
-            "name": "可选，策略名称（用于确认/辅助定位）",
-        },
-    },
     {
         "name": "query_triggers",
         "description": "查询指定时间范围内的股票触发记录",

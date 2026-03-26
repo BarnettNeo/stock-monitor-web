@@ -11,35 +11,9 @@ def format_tool_results(tool_results: List[ToolResult]) -> str:
             lines.append(f"- 工具 `{tr.name}` 执行失败：{tr.error or 'unknown error'}")
             continue
 
-        # 1. 策略列表
-        if tr.name == "list_strategies" and isinstance(tr.result, dict):
-            items = tr.result.get("items")
-            if isinstance(items, list) and items:
-                lines.append(f"📋 共 {len(items)} 条策略：")
-                for i, s in enumerate(items[:20], start=1):
-                    if not isinstance(s, dict):
-                        continue
-                    nm = s.get("name")
-                    sy = s.get("symbols")
-                    en = s.get("enabled")
-                    lines.append(f"{i}. {nm} ({'✅启用' if en else '❌停用'}) - {sy}")
-            else:
-                lines.append("📋 当前没有策略。")
-        
-        # 2. 创建策略
-        elif tr.name == "create_strategy" and isinstance(tr.result, dict):
-            lines.append(
-                f"✅ 已创建策略：{tr.result.get('name')}\n"
-                f"   📝 ID: {tr.result.get('id')}\n"
-                f"   📊 股票: {tr.result.get('symbols')}"
-            )
-        
-        # 3. 删除策略
-        elif tr.name == "delete_strategy" and isinstance(tr.result, dict):
-            lines.append(f"🗑️ 已删除策略：{tr.result.get('name')}")
-        
-        # 4. 查询触发记录
-        elif tr.name == "query_triggers" and isinstance(tr.result, dict):
+        # 1. 查询触发记录
+        if tr.name == "query_triggers" and isinstance(tr.result, dict):
+
             triggers = tr.result.get("triggers", [])
             if isinstance(triggers, list) and triggers:
                 lines.append(f"🔔 共 {len(triggers)} 条触发记录：")
@@ -52,7 +26,8 @@ def format_tool_results(tool_results: List[ToolResult]) -> str:
             else:
                 lines.append("🔔 暂无触发记录。")
         
-        # 5. 获取诊断详情
+        # 2. 获取诊断详情
+
         elif tr.name == "get_diagnostic" and isinstance(tr.result, dict):
             symbol = tr.result.get("symbol")
             diagnosis = tr.result.get("diagnosis", {})
@@ -61,13 +36,15 @@ def format_tool_results(tool_results: List[ToolResult]) -> str:
                 for key, value in diagnosis.items():
                     lines.append(f"   • {key}: {value}")
         
-        # 6. 更新订阅
+        # 3. 更新订阅
+
         elif tr.name == "update_subscription" and isinstance(tr.result, dict):
             sub_type = tr.result.get("type")
             status = tr.result.get("status")
             lines.append(f"📱 {sub_type} 订阅已{status}。")
         
-        # 7. 获取股票信息
+        # 4. 获取股票信息
+
         elif tr.name == "get_stock_info" and isinstance(tr.result, dict):
             stocks = tr.result.get("stocks", [])
             if isinstance(stocks, list):
@@ -80,7 +57,8 @@ def format_tool_results(tool_results: List[ToolResult]) -> str:
                         change_pct = stock.get("changePercent")
                         lines.append(f"   {symbol}: {price} ({change_pct}%)")
         
-        # 8. 生成报告
+        # 5. 生成报告
+
         elif tr.name == "generate_report" and isinstance(tr.result, dict):
             report_type = tr.result.get("reportType")
             summary = tr.result.get("summary", {})

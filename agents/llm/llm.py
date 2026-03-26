@@ -180,37 +180,16 @@ async def call_openai_compatible(
 
 
 def heuristic_tool_calls(message: str) -> List[Any]:
-    """基于规则的工具调用（兜底方案）- 支持8个用户意图"""
+    """基于规则的工具调用（兜底方案，仅非策略类工具）。"""
+
     from core.models import ToolCall
     
     m = message.strip()
     if not m:
         return []
 
-    # 1. 查询策略
-    if any(x in m for x in ["列出策略", "策略列表", "有哪些策略", "查看策略", "我的策略", "所有策略"]):
-        return [ToolCall(id="t1", name="list_strategies", arguments={"limit": 20})]
+    # 1. 查询触发记录
 
-    # 2. 创建策略
-    # NOTE: 避免“监控报告/周报/月报”等意图被误判为“创建策略”
-    if any(x in m for x in ["新增策略", "创建策略", "添加策略", "监控", "设置提醒"]) and not any(
-        k in m for k in ["报告", "汇总", "总结", "日报", "周报", "月报"]
-    ) and not any(k in m for k in ["删除", "移除", "取消监控", "删除监控", "移除监控"]):
-        from domain.strategy import extract_symbols_from_text
-        codes = extract_symbols_from_text(m)
-        args: Dict[str, Any] = {"name": "新策略", "symbols": codes or ""}
-        return [ToolCall(id="t1", name="create_strategy", arguments=args)]
-
-    # 3. 删除策略
-    if any(x in m for x in ["删除策略", "移除策略", "取消监控", "删除监控"]):
-        # 尝试提取策略名称或股票代码
-        from domain.strategy import extract_symbols_from_text
-        codes = extract_symbols_from_text(m)
-        if codes:
-            return [ToolCall(id="t1", name="delete_strategy", arguments={"symbols": codes})]
-        return [ToolCall(id="t1", name="delete_strategy", arguments={"strategyId": "unknown"})]
-
-    # 4. 查询触发记录
     # NOTE: 不能仅凭“本周/本月”触发，否则“生成本周监控报告”会被误当成触发查询
     if any(x in m for x in ["触发", "异动", "提醒", "今天", "哪些股票"]):
         time_range = "today"
@@ -226,14 +205,16 @@ def heuristic_tool_calls(message: str) -> List[Any]:
             args["symbols"] = codes
         return [ToolCall(id="t1", name="query_triggers", arguments=args)]
 
-    # 5. 获取诊断详情
+    # 2. 获取诊断详情
+
     if any(x in m for x in ["诊断", "详情", "分析", "什么情况", "为什么"]):
         from domain.strategy import extract_symbols_from_text
         codes = extract_symbols_from_text(m)
         if codes:
             return [ToolCall(id="t1", name="get_diagnostic", arguments={"symbol": codes[0]})]
 
-    # 6. 订阅管理
+    # 3. 订阅管理
+
     if any(x in m for x in ["钉钉", "企微", "企业微信", "推送", "绑定", "订阅"]):
         sub_type = "dingtalk" if "钉钉" in m else "wechat" if "企微" in m or "企业微信" in m else "email"
         # 尽量从消息中提取 webhook URL 作为 endpoint
@@ -247,7 +228,8 @@ def heuristic_tool_calls(message: str) -> List[Any]:
 
         return [ToolCall(id="t1", name="update_subscription", arguments=args)]
 
-    # 7. 查询股价信息
+    # 4. 查询股价信息
+
     if any(x in m for x in ["价格", "多少钱", "股价", "现在", "当前", "涨跌"]):
         from domain.strategy import extract_symbols_from_text, extract_stock_names_from_text
 
@@ -262,7 +244,8 @@ def heuristic_tool_calls(message: str) -> List[Any]:
             return [ToolCall(id="t1", name="get_stock_info", arguments={"symbols": names})]
 
 
-    # 8. 生成报告
+    # 5. 生成报告
+
     if any(x in m for x in ["报告", "汇总", "总结", "周报", "月报", "日报"]):
         report_type = "daily"
         if any(x in m for x in ["周报", "本周"]):
@@ -291,7 +274,8 @@ def build_decision_prompt(
     return (
         "你将输出一个 JSON 对象，且只能输出 JSON（不要输出其它文本）。\n"
         "如果需要调用工具，请输出：\n"
-        "{\"type\":\"tool_calls\",\"toolCalls\":[{\"id\":\"t1\",\"name\":\"list_strategies\",\"arguments\":{...}}]}\n"
+        "{\"type\":\"tool_calls\",\"toolCalls\":[{\"id\":\"t1\",\"name\":\"query_triggers\",\"arguments\":{...}}]}\n"
+
         "如果可以直接回复用户，请输出：\n"
         "{\"type\":\"final\",\"reply\":\"...\"}\n\n"
         f"可用工具如下（JSON）：{tools_text}\n"
