@@ -1,7 +1,7 @@
 import json
 from typing import Any, Dict, List
 
-from core.config import _env, _history_limit
+from core.config import _env, _history_limit, _port
 
 
 class Memory:
@@ -16,7 +16,7 @@ class Memory:
 
         # 初始化Redis
         redis_url = _env("REDIS_URL", "")
-        print(f"Redis URL: {redis_url}")
+        print(f"Redis URL: {redis_url}, {_port}")
         if redis_url:
             try:
                 import redis.asyncio as redis  # type: ignore

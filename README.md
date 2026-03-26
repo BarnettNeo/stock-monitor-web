@@ -47,11 +47,16 @@ agents/
 ├── infrastructure/
 │   ├── __init__.py
 │   └── memory.py            # 内存管理（Redis/内存存储）
+├── skills/
+│   ├── router.py            # Skill路由：意图 -> 最小工具集合（省token）
+│   ├── specs.py             # 工具规格裁剪：只给LLM必要的参数名
+│   └── compact.py           # 工具结果裁剪：减少toolResults注入体积
 └── llm/
     ├── __init__.py
     ├── langchain_integration.py # LangChain集成（ReAct模式）
     ├── llm.py               # LLM处理（通义千问集成）
     └── tools.py             # 工具处理（结果格式化）
+
 ```
 
 ### ReAct模式
@@ -170,11 +175,48 @@ Agent处理：
 
 ## 🛠️ 开发指南
 
+### Agent Skills（省 token + 提效率）
+
+本项目的 `agents` 采用“**skill 路由**”来减少 LLM 决策阶段的固定 token 开销：
+- **决策阶段只注入“最小工具集合”**：不再把全量 `TOOLS_SPEC`（尤其是 `create_strategy` 的长 args）每次都塞进 prompt。
+- **工具结果注入做裁剪**：对 `toolResults` 只保留对回答最关键的字段（并限制列表长度）。
+- **工具后总结只带少量历史**：用于总结的 history 默认只带最近 6 条，避免上下文膨胀。
+
+相关实现：
+- `agents/skills/router.py`：把用户话术路由到某个 skill（通常对应 1 个工具）
+- `agents/skills/specs.py`：把工具 spec 压缩成“参数名列表”
+- `agents/skills/compact.py`：把 `toolResults` 压缩成可读摘要再注入 LLM
+
+#### 当前内置的 skill（与 8 个工具意图一致）
+- `list_strategies`：策略查询
+- `delete_strategy`：策略删除（信息不足优先追问确认）
+- `query_triggers`：触发/异动查询
+- `get_diagnostic`：诊断详情
+- `update_subscription`：订阅绑定/更新
+- `get_stock_info`：行情查询
+- `generate_report`：报告生成
+- `create_strategy`：走 `domain/strategy.py` 的专用“缺参追问 + 抽取”流程（更像 slot-filling skill）
+
+#### 如何扩展 skill
+- **新增/调整路由规则**：改 `agents/skills/router.py` 的 `_SKILLS` 或 `select_skill()` 优先级
+- **新增 token 优化策略**：在 `agents/skills/specs.py` / `agents/skills/compact.py` 增加更细粒度的裁剪规则
+
+#### 可扩展的 skill 功能（建议清单）
+- **对话摘要 skill**：把长 history 压成“状态摘要”，再参与决策/总结
+- **策略解释 skill**：把策略配置翻译成用户可读的自然语言说明与风险提示
+- **参数确认 skill（通用）**：给删除/订阅/诊断等“写操作/关键参数”统一缺参追问
+- **行情增强 skill**：加入更多字段（成交量/换手/振幅）与单位格式化
+- **多源数据 skill**：新浪 + 其他行情源（故障切换/对账）
+- **信号扩展 skill**：RSI/KDJ/布林带/形态识别更丰富的解释与建议
+- **报告分析 skill**：报告里增加异常原因归因、Top 策略/Top 股票排行
+- **（可选）RAG/知识库 skill**：接入本地文档或策略手册，回答“为什么/怎么配置更好”类问题
+
 ### 添加新工具
 1. 在`core/config.py`的`TOOLS_SPEC`中添加工具定义
 2. 在`llm/tools.py`中添加工具调用的格式化逻辑
 3. 在`llm/llm.py`的`heuristic_tool_calls`中补充规则兜底逻辑
 4. 确保 Node.js 侧 (`server/src/tools/...`) 也同步实现了该工具的具体执行逻辑
+
 
 ---
 

@@ -37,7 +37,7 @@ type ToolResult = {
 // -----------------------------
 
 function getAgentsBaseUrl(): string {
-  const raw = String(process.env.AGENTS_BASE_URL || 'http://127.0.0.1:8008').trim();
+  const raw = String(process.env.AGENTS_BASE_URL || 'http://127.0.0.1:8009').trim();
   return raw.replace(/\/$/, '');
 }
 
@@ -744,7 +744,7 @@ export function registerAgentRoutes(app: Express): void {
     if (!message) return res.status(400).json({ message: 'message 不能为空' });
 
     const baseUrl = getAgentsBaseUrl();
-
+    console.log(`baseUrl`, baseUrl);
     const basePayload = {
       message,
       context: req.body?.context,

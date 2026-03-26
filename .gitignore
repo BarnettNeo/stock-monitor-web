@@ -32,3 +32,4 @@ openspec/*.log
 
 docs/
 *.log
+.codebuddy/

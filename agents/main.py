@@ -23,13 +23,14 @@ from llm.tools import format_tool_results, parse_final_reply_from_llm_response, 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """应用生命周期管理"""
-    print("Stock Monitor Agents 2026 startup complete")
+    print(f"Stock Monitor Agents 2026 startup complete (loaded from: {__file__})")
     yield
     print("Stock Monitor Agents 2026 shutdown")
 
 
 app = FastAPI(title=APP_NAME, lifespan=lifespan)
 
+print(f"开始", _port)
 
 @app.get("/health")
 def health() -> Dict[str, Any]:
@@ -84,12 +85,19 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
     req_model = _sanitize_model((payload.context or {}).get("model") if isinstance(payload.context, dict) else None)
 
     history = await memory.load(user_id)
-    print(f"history: {history}")
+    # print(f"history: {history}")
 
-    # 1) 若已经有 toolResults：直接让 LLM 基于工具结果生成最终回复
+    # 1) 若已经有 toolResults：基于工具结果生成最终回复（对 history/toolResults 做裁剪以节省 token）
     if tool_results:
+        print(f"当前 LLM回答")
+
+        from skills.compact import compact_tool_results_for_prompt
+        HISTORY_FOR_TOOL_SUMMARY_LIMIT = 6
+
         messages: List[Dict[str, Any]] = [{"role": "system", "content": SYSTEM_PROMPT}]
-        for m in history:
+
+        history_for_prompt = history[-HISTORY_FOR_TOOL_SUMMARY_LIMIT:] if isinstance(history, list) else []
+        for m in history_for_prompt:
             if isinstance(m, dict) and m.get("role") in ("user", "assistant") and isinstance(m.get("content"), str):
                 messages.append({"role": m["role"], "content": m["content"]})
 
@@ -97,7 +105,7 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
         messages.append(
             {
                 "role": "system",
-                "content": f"工具执行结果（JSON）：{json.dumps([tr.model_dump() for tr in tool_results], ensure_ascii=False)}",
+                "content": f"工具执行结果（JSON）：{json.dumps(compact_tool_results_for_prompt(tool_results), ensure_ascii=False)}",
             }
         )
         messages.append({"role": "user", "content": "请基于工具结果，给出最终答复。"})
@@ -113,17 +121,18 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
             await memory.append(user_id, {"role": "assistant", "content": reply})
 
         cfg = _llm_config()
-        print(f"LLM: {reply}")
         return AgentChatResponse(
             reply=reply,
             toolCalls=[],
             meta={
                 "mode": "llm",
                 "model": req_model or cfg.get("model"),
-                "historyUsed": len(history),
+                "historyUsed": len(history_for_prompt),
                 "toolResults": len(tool_results),
+                "promptCompaction": True,
             },
         )
+
 
     # 2) 无 toolResults：决定直接回复还是发起 toolCalls
     #    先把 user 消息写入记忆（只写一次）
@@ -134,6 +143,7 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
     cfg = _llm_config()
 
     if not (cfg.get("base_url") and cfg.get("api_key")):
+        print(f"no LLM")
         # 创建策略：即使无 LLM 也尽量做缺参追问/规则抽取
         state = await memory.load_state(user_id) if user_id else {}
         pending = state.get("pending") if isinstance(state, dict) else None
@@ -157,11 +167,32 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
     if has_pending_create or looks_like_create_strategy(message):
         return await handle_create_strategy_flow(user_id=user_id, message=message, req_model=req_model, cfg_ok=True)
 
-    # 有 LLM：用 JSON decision
+    # 有 LLM：用 JSON decision（按 skill 注入最小工具集合以节省 token）
+    from skills.router import select_skill
+    from skills.specs import compact_tools_spec
+
+    skill = select_skill(message, state if isinstance(state, dict) else {})
+    tools_override = None
+    skill_hint = ""
+
+    # create_strategy 走专用流程，不在这里走 decision
+    if skill and skill.tool_name and skill.tool_name != "create_strategy":
+        tools_override = compact_tools_spec([skill.tool_name])
+        skill_hint = f"当前 skill：{skill.name}。{skill.hint}".strip()
+
     decision_messages: List[Dict[str, Any]] = [
         {"role": "system", "content": SYSTEM_PROMPT},
-        {"role": "user", "content": build_decision_prompt(message, has_tool_results=False)},
+        {
+            "role": "user",
+            "content": build_decision_prompt(
+                message,
+                has_tool_results=False,
+                tools_spec_override=tools_override,
+                skill_hint=skill_hint,
+            ),
+        },
     ]
+
 
     llm = await call_openai_compatible(decision_messages, model_override=req_model, json_mode=True)
 

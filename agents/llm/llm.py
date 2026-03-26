@@ -274,20 +274,33 @@ def heuristic_tool_calls(message: str) -> List[Any]:
     return []
 
 
-def build_decision_prompt(user_message: str, has_tool_results: bool) -> str:
-    """构建决策提示词"""
-    tools_text = json.dumps(TOOLS_SPEC, ensure_ascii=False)
+def build_decision_prompt(
+    user_message: str,
+    has_tool_results: bool,
+    tools_spec_override: Optional[List[Dict[str, Any]]] = None,
+    skill_hint: str = "",
+) -> str:
+    """构建决策提示词（支持按 skill 注入最小工具集合以节省 token）"""
+
+    tools = tools_spec_override if tools_spec_override is not None else TOOLS_SPEC
+    tools_text = json.dumps(tools, ensure_ascii=False)
+
+    hint = (skill_hint or "").strip()
+    hint_block = f"\n当前场景提示：{hint}\n" if hint else ""
+
     return (
         "你将输出一个 JSON 对象，且只能输出 JSON（不要输出其它文本）。\n"
         "如果需要调用工具，请输出：\n"
         "{\"type\":\"tool_calls\",\"toolCalls\":[{\"id\":\"t1\",\"name\":\"list_strategies\",\"arguments\":{...}}]}\n"
         "如果可以直接回复用户，请输出：\n"
         "{\"type\":\"final\",\"reply\":\"...\"}\n\n"
-        f"可用工具如下（JSON）：{tools_text}\n\n"
+        f"可用工具如下（JSON）：{tools_text}\n"
+        f"{hint_block}\n"
         "注意：\n"
         "- 不要编造系统里的策略/日志数据；如需要数据必须先调用工具。\n"
         "- 一次可以调用多个工具，但尽量少。\n"
-        "- 创建策略前，如果用户没给股票代码/阈值等关键参数，优先先问1-2个澄清问题（final）。\n"
+        "- 删除/写入类操作（例如删除策略、绑定推送）在信息不足时，优先先问 1-2 个澄清问题（final）。\n"
         f"当前是否已提供工具执行结果：{str(has_tool_results).lower()}\n\n"
         f"用户消息：{user_message}"
     )
+
