@@ -54,6 +54,25 @@ async function queryOneOnPool<T = any>(sql: string, params: any[] = []): Promise
   return rows[0] || null;
 }
 
+async function ensureMySqlColumn(
+  tableName: string,
+  columnName: string,
+  columnDdl: string,
+): Promise<void> {
+  const cfg = getDbConfig();
+  const row = await queryOneOnPool<{ ok: number }>(
+    `SELECT 1 as ok
+     FROM information_schema.columns
+     WHERE table_schema = ?
+       AND table_name = ?
+       AND column_name = ?
+     LIMIT 1`,
+    [cfg.database, tableName, columnName],
+  );
+  if (row) return;
+  await executeOnPool(`ALTER TABLE \`${tableName}\` ADD COLUMN ${columnDdl}`);
+}
+
 // 确保数据库连接池已初始化
 async function ensureInitialized(): Promise<void> {
   if (!pool) {
@@ -157,10 +176,28 @@ async function migrateMySqlSchema(): Promise<void> {
       password_salt VARCHAR(128) NOT NULL,
       password_hash VARCHAR(256) NOT NULL,
       role VARCHAR(16) NOT NULL,
+      user_package VARCHAR(16) NOT NULL DEFAULT 'free',
+      package_expire VARCHAR(40),
+      max_strategy_count INT NOT NULL DEFAULT 3,
       created_at VARCHAR(40) NOT NULL,
       updated_at VARCHAR(40) NOT NULL
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+
+  // MySQL compatibility: "ADD COLUMN IF NOT EXISTS" is not supported on many versions.
+  await ensureMySqlColumn('users', 'user_package', "user_package VARCHAR(16) NOT NULL DEFAULT 'free'");
+  await ensureMySqlColumn('users', 'package_expire', 'package_expire VARCHAR(40)');
+  await ensureMySqlColumn('users', 'max_strategy_count', 'max_strategy_count INT NOT NULL DEFAULT 3');
+
+  await executeOnPool(
+    "UPDATE users SET user_package = 'free' WHERE user_package IS NULL OR user_package = ''",
+  );
+  await executeOnPool(
+    'UPDATE users SET max_strategy_count = 3 WHERE max_strategy_count IS NULL OR max_strategy_count <= 0',
+  );
+  await executeOnPool(
+    "UPDATE users SET package_expire = DATE_FORMAT(DATE_ADD(UTC_TIMESTAMP(), INTERVAL 5 DAY), '%Y-%m-%dT%H:%i:%s.000Z') WHERE package_expire IS NULL OR package_expire = ''",
+  );
 
   await executeOnPool(`
     CREATE TABLE IF NOT EXISTS strategies (

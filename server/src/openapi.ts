@@ -145,6 +145,29 @@ export const openapiDoc = {
         responses: { '200': { description: 'OK' } },
       },
     },
+    '/api/quotes/resolve': {
+      get: {
+        summary: 'Resolve Sina symbol by name',
+        parameters: [{ name: 'q', in: 'query', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/users/me/package': {
+      get: {
+        summary: 'Get current user package info',
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/users/me/strategy/check': {
+      post: {
+        summary: 'Check create-strategy permission by package',
+        requestBody: {
+          required: false,
+          content: { 'application/json': { schema: { type: 'object' } } },
+        },
+        responses: { '200': { description: 'OK' } },
+      },
+    },
     '/openapi.json': {
       get: {
         summary: 'OpenAPI JSON',

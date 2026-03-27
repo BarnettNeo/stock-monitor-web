@@ -232,9 +232,9 @@ watch(
 }
 
 .agent-float-panel {
-  width: 420px;
+  width: 450px;
   max-width: calc(100vw - 32px);
-  height: 560px;
+  height: 700px;
   max-height: calc(100vh - 32px);
   background: #fff;
   border: 1px solid var(--el-border-color-light);

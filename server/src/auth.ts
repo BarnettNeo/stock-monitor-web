@@ -7,6 +7,9 @@ export type AuthedUser = {
   userId: string;
   username: string;
   role: 'admin' | 'user';
+  userPackage?: 'free' | 'vip';
+  packageExpire?: string | null;
+  maxStrategyCount?: number;
 };
 
 export const AUTH_ADMIN_USER_ID = 'admin';
@@ -85,5 +88,12 @@ export async function requireAuth(req: Request, res: Response): Promise<AuthedUs
   }
 
   const role: 'admin' | 'user' = row.role === 'admin' ? 'admin' : 'user';
-  return { userId: String(row.id), username: String(row.username), role };
+  return {
+    userId: String(row.id),
+    username: String(row.username),
+    role,
+    userPackage: String((row as any).user_package || '').toLowerCase() === 'vip' ? 'vip' : 'free',
+    packageExpire: (row as any).package_expire ? String((row as any).package_expire) : null,
+    maxStrategyCount: Number((row as any).max_strategy_count || 0),
+  };
 }

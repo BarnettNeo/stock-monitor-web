@@ -11,11 +11,13 @@ from domain.strategy import (
     build_create_strategy_questions,
     extract_minutes_from_text,
     extract_percent_from_text,
+    extract_stock_names_from_text,
     extract_symbols_from_text,
     extract_target_prices_from_text,
     llm_extract_create_strategy_args,
     looks_like_create_strategy,
     merge_args,
+    normalize_symbol,
 )
 from infrastructure.memory import memory
 from llm.llm import call_openai_compatible, extract_json_object
@@ -27,6 +29,68 @@ UUID_RE = re.compile(
     r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}",
     re.IGNORECASE,
 )
+
+
+def _symbols_value_from_any(v: Any) -> str:
+    if isinstance(v, list):
+        return ",".join(str(x).strip() for x in v if str(x).strip())
+    return str(v or "").strip()
+
+
+async def _resolve_symbols_value(auth_header: str, symbols_value: str) -> Tuple[str, List[str]]:
+    """Resolve mixed symbols (codes or Chinese names) into sh/sz codes via server resolver."""
+    raw = str(symbols_value or "").strip()
+    if not raw:
+        return "", []
+
+    parts = [p.strip() for p in raw.split(",") if p.strip()]
+    resolved: List[str] = []
+    unresolved: List[str] = []
+
+    for part in parts:
+        n = normalize_symbol(part)  # handles sh600519 / 600519
+        if n:
+            resolved.append(n)
+            continue
+
+        try:
+            data = await _api_request(
+                "GET",
+                "/api/quotes/resolve",
+                auth_header=auth_header,
+                params={"q": part},
+            )
+            sym = str((data or {}).get("symbol") or "").strip()
+        except Exception:
+            sym = ""
+
+        n2 = normalize_symbol(sym) if sym else None
+        if n2:
+            resolved.append(n2)
+        else:
+            unresolved.append(part)
+
+    # De-dup while preserving order
+    uniq: List[str] = []
+    seen = set()
+    for x in resolved:
+        k = str(x).lower()
+        if k in seen:
+            continue
+        uniq.append(x)
+        seen.add(k)
+
+    return ",".join(uniq), unresolved
+
+
+async def _save_last_strategy_id(user_id: str, strategy_id: str) -> None:
+    if not user_id or not strategy_id:
+        return
+    state = await memory.load_state(user_id)
+    base = state if isinstance(state, dict) else {}
+    merged = dict(base)
+    merged["lastStrategyId"] = str(strategy_id)
+    await memory.save_state(user_id, merged)
 
 LIST_KEYWORDS = ["策略列表", "列出策略", "查看策略", "我的策略", "所有策略", "有哪些策略"]
 GET_KEYWORDS = ["策略详情", "查看详情", "查看策略详情", "策略信息", "策略配置"]
@@ -351,7 +415,12 @@ def _match_candidates(message: str, items: List[Dict[str, Any]]) -> List[Dict[st
 
 async def _save_pending(user_id: str, pending: Dict[str, Any], reply: str) -> AgentChatResponse:
     if user_id:
-        await memory.save_state(user_id, {"pending": pending})
+        # Merge state to avoid clobbering other keys (e.g., lastStrategyId).
+        state = await memory.load_state(user_id)
+        base = state if isinstance(state, dict) else {}
+        merged = dict(base)
+        merged["pending"] = pending
+        await memory.save_state(user_id, merged)
         await memory.append(user_id, {"role": "assistant", "content": reply})
     return AgentChatResponse(
         reply=reply,
@@ -362,7 +431,14 @@ async def _save_pending(user_id: str, pending: Dict[str, Any], reply: str) -> Ag
 
 async def _clear_pending(user_id: str) -> None:
     if user_id:
-        await memory.clear_state(user_id)
+        # Only clear the pending flow; keep other state (e.g., lastStrategyId).
+        state = await memory.load_state(user_id)
+        if isinstance(state, dict) and "pending" in state:
+            merged = dict(state)
+            merged.pop("pending", None)
+            await memory.save_state(user_id, merged)
+        else:
+            await memory.clear_state(user_id)
 
 
 def _create_patch_from_rules(message: str) -> Dict[str, Any]:
@@ -373,6 +449,12 @@ def _create_patch_from_rules(message: str) -> Dict[str, Any]:
     symbols = extract_symbols_from_text(message)
     if symbols:
         patch["symbols"] = symbols
+    else:
+        # Try Chinese stock names when creating/updating strategy, so later we can resolve to sh/sz codes.
+        if looks_like_create_strategy(message) or any(k in message for k in ["股票", "监控"]):
+            names = extract_stock_names_from_text(message)
+            if names:
+                patch["symbols"] = names
 
     target_patch = extract_target_prices_from_text(message)
     if target_patch:
@@ -609,6 +691,7 @@ async def _resolve_target_or_ask(
     auth_header: str,
     current_user_id: str,
     include_all: bool,
+    last_strategy_id: str = "",
     owner_hint: str = "",
     patch: Optional[Dict[str, Any]] = None,
 ) -> Tuple[Optional[Dict[str, Any]], Optional[AgentChatResponse]]:
@@ -623,6 +706,13 @@ async def _resolve_target_or_ask(
         if user_id:
             await memory.append(user_id, {"role": "assistant", "content": reply})
         return None, AgentChatResponse(reply=reply, toolCalls=[], meta={"mode": "skill", "skill": STRATEGY_SKILL_NAME})
+
+    # If user refers to "this/last" strategy, try to use the last created/operated one.
+    lowered_msg = (user_message or "").strip().lower()
+    if last_strategy_id and any(k in lowered_msg for k in ["这个策略", "刚才", "刚刚", "上一个", "刚创建", "this strategy", "last strategy"]):
+        for item in items:
+            if str(item.get("id") or "") == str(last_strategy_id):
+                return item, None
 
     strategy_id = _extract_strategy_id(user_message)
     if strategy_id:
@@ -755,6 +845,14 @@ async def _do_update(user_id: str, strategy_id: str, patch: Dict[str, Any], auth
         "enablePatternSignal": patch.get("enablePatternSignal", current.get("enablePatternSignal", False)),
     }
 
+    resolved_symbols, unresolved = await _resolve_symbols_value(auth_header, str(body.get("symbols") or ""))
+    if unresolved:
+        raise RuntimeError(
+            f"无法解析股票代码/名称：{', '.join(unresolved)}。请提供如 sh600519 / 600519，或更准确的中文名称。"
+        )
+    if resolved_symbols:
+        body["symbols"] = resolved_symbols
+
     if body["alertMode"] != "target":
         body.pop("targetPriceUp", None)
         body.pop("targetPriceDown", None)
@@ -809,7 +907,14 @@ async def _handle_pending(
             return await _save_pending(user_id, {"type": STRATEGY_SKILL_NAME, "stage": "create_missing", "draft": draft}, reply)
 
         body = _create_request_body(draft)
+        resolved_symbols, unresolved = await _resolve_symbols_value(auth_header, str(body.get("symbols") or ""))
+        if unresolved:
+            reply = f"无法解析股票代码/名称：{', '.join(unresolved)}。请提供如 sh600519 / 600519，或更准确的中文名称。"
+            return await _save_pending(user_id, {"type": STRATEGY_SKILL_NAME, "stage": "create_missing", "draft": draft}, reply)
+        if resolved_symbols:
+            body["symbols"] = resolved_symbols
         data = await _api_request("POST", "/api/strategies", auth_header=auth_header, json_body=body)
+        await _save_last_strategy_id(user_id, str(data.get("id") or ""))
         await _clear_pending(user_id)
         reply = f"已创建策略：{body['name']}\nID: {data.get('id')}\n股票: {body['symbols']}"
         if user_id:
@@ -898,6 +1003,7 @@ async def handle_strategy_management_skill(
         return AgentChatResponse(reply=reply, toolCalls=[], meta={"mode": "skill", "skill": STRATEGY_SKILL_NAME, "state": "unauthorized"})
 
     state = await memory.load_state(user_id) if user_id else {}
+    last_strategy_id = str(state.get("lastStrategyId") or "") if isinstance(state, dict) else ""
     pending = state.get("pending") if isinstance(state, dict) else None
     # Allow explicit fresh commands to interrupt stale pending flow.
     if isinstance(pending, dict) and pending.get("type") == STRATEGY_SKILL_NAME:
@@ -965,6 +1071,7 @@ async def handle_strategy_management_skill(
                 auth_header=auth_header,
                 current_user_id=current_user_id,
                 include_all=admin_mode,
+                last_strategy_id=last_strategy_id,
                 owner_hint=owner_hint,
             )
             if response:
@@ -979,6 +1086,7 @@ async def handle_strategy_management_skill(
                 auth_header=auth_header,
                 current_user_id=current_user_id,
                 include_all=admin_mode,
+                last_strategy_id=last_strategy_id,
                 owner_hint=owner_hint,
             )
             if response:
@@ -1006,6 +1114,7 @@ async def handle_strategy_management_skill(
                 auth_header=auth_header,
                 current_user_id=current_user_id,
                 include_all=admin_mode,
+                last_strategy_id=last_strategy_id,
                 owner_hint=owner_hint,
                 patch=patch,
             )
@@ -1035,7 +1144,18 @@ async def handle_strategy_management_skill(
                 )
 
             body = _create_request_body(create_draft)
+            resolved_symbols, unresolved = await _resolve_symbols_value(auth_header, str(body.get("symbols") or ""))
+            if unresolved:
+                reply = f"无法解析股票代码/名称：{', '.join(unresolved)}。请提供如 sh600519 / 600519，或更准确的中文名称。"
+                return await _save_pending(
+                    user_id,
+                    {"type": STRATEGY_SKILL_NAME, "stage": "create_missing", "draft": create_draft},
+                    reply,
+                )
+            if resolved_symbols:
+                body["symbols"] = resolved_symbols
             data = await _api_request("POST", "/api/strategies", auth_header=auth_header, json_body=body)
+            await _save_last_strategy_id(user_id, str(data.get("id") or ""))
             reply = f"已创建策略：{body['name']}\nID: {data.get('id')}\n股票: {body['symbols']}"
             if user_id:
                 await memory.append(user_id, {"role": "assistant", "content": reply})

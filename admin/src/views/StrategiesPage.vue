@@ -17,42 +17,32 @@
         <el-table-column prop="name" label="名称" />
         <el-table-column prop="symbols" label="股票代码" min-width="150" />
         <el-table-column prop="stockNames" label="股票名称" min-width="200" />
-        <el-table-column prop="alertMode" label="告警方式" min-width="230">
+        <el-table-column prop="alertMode" label="告警方式" min-width="260">
           <template #default="scope">
             <template v-if="scope.row.alertMode === 'target'">
               目标价触发
               <span style="color: #666">
-                （涨至：{{ scope.row.targetPriceUp ? `${scope.row.targetPriceUp}` : '-' }} / 跌至：{{ scope.row.targetPriceDown ? `${scope.row.targetPriceDown}` : '-' }})
+                （涨至: {{ scope.row.targetPriceUp ?? '-' }} / 跌至: {{ scope.row.targetPriceDown ?? '-' }}）
               </span>
             </template>
             <template v-else>
               大幅异动监控
-              <span style="color: #666">（阈值：{{ scope.row.priceAlertPercent ?? '-' }}%）</span>
+              <span style="color: #666">（阈值: {{ scope.row.priceAlertPercent ?? '-' }}%）</span>
             </template>
           </template>
         </el-table-column>
-        <el-table-column prop="intervalMs" label="推送时间间隔(分)" width="135">
+        <el-table-column prop="intervalMs" label="推送间隔(分)" width="120">
           <template #default="scope">
             {{ typeof scope.row.intervalMs === 'number' ? scope.row.intervalMs / 60000 : '-' }}
           </template>
         </el-table-column>
-        <el-table-column label="技术指标触发列表" min-width="210">
+        <el-table-column label="技术指标" min-width="220">
           <template #default="scope">
-            <template v-if="scope.row.enableMacdGoldenCross">
-              <el-tag size="small" style="margin-right: 4px">MACD</el-tag>
-            </template>
-            <template v-if="scope.row.enableRsiOversold">
-              <el-tag size="small" style="margin-right: 4px">RSI超卖</el-tag>
-            </template>
-            <template v-if="scope.row.enableRsiOverbought">
-              <el-tag size="small" style="margin-right: 4px">RSI超买</el-tag>
-            </template>
-            <template v-if="scope.row.enableMovingAverages">
-              <el-tag size="small" style="margin-right: 4px">均线</el-tag>
-            </template>
-            <template v-if="scope.row.enablePatternSignal">
-              <el-tag size="small" style="margin-right: 4px">形态</el-tag>
-            </template>
+            <el-tag v-if="scope.row.enableMacdGoldenCross" size="small" style="margin-right: 4px">MACD</el-tag>
+            <el-tag v-if="scope.row.enableRsiOversold" size="small" style="margin-right: 4px">RSI超卖</el-tag>
+            <el-tag v-if="scope.row.enableRsiOverbought" size="small" style="margin-right: 4px">RSI超买</el-tag>
+            <el-tag v-if="scope.row.enableMovingAverages" size="small" style="margin-right: 4px">均线</el-tag>
+            <el-tag v-if="scope.row.enablePatternSignal" size="small" style="margin-right: 4px">形态</el-tag>
             <span
               v-if="
                 !scope.row.enableMacdGoldenCross &&
@@ -67,12 +57,8 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column prop="cooldownMinutes" label="冷却时间(分)" width="110">
-          <template #default="scope">
-            {{ typeof scope.row.cooldownMinutes === 'number' ? scope.row.cooldownMinutes : '-' }}
-          </template>
-        </el-table-column>
-        <el-table-column label="推送方式" width="80">
+        <el-table-column prop="cooldownMinutes" label="冷却(分)" width="100" />
+        <el-table-column label="推送方式" width="120">
           <template #default="scope">
             <template v-for="subId in (scope.row.subscriptionIds || [])" :key="subId">
               <el-tag
@@ -91,9 +77,7 @@
         </el-table-column>
         <el-table-column prop="enabled" label="启用" width="80">
           <template #default="scope">
-            <el-tag :type="scope.row.enabled ? 'success' : 'info'">
-              {{ scope.row.enabled ? '是' : '否' }}
-            </el-tag>
+            <el-tag :type="scope.row.enabled ? 'success' : 'info'">{{ scope.row.enabled ? '是' : '否' }}</el-tag>
           </template>
         </el-table-column>
         <el-table-column prop="createdByUsername" label="创建人" width="100" />
@@ -111,10 +95,23 @@
       </el-table>
     </el-card>
 
-    <el-dialog v-model="dialogVisible" :title="editing ? '编辑策略' : '新增策略'" width="720px">
+    <el-dialog v-model="dialogVisible" :title="editing ? '编辑策略' : '新增策略'" width="760px">
+      <el-alert
+        v-if="isFreePackage"
+        type="warning"
+        :closable="false"
+        style="margin-bottom: 12px"
+        title="免费版创建策略仅支持基础配置，RSI超卖 / RSI超买 / 均线信号 / 形态信号已限制。"
+      />
+
       <el-form ref="formRef" :model="form" :rules="rules" label-width="130px">
         <el-form-item label="策略名称" prop="name">
           <el-input v-model="form.name" />
+        </el-form-item>
+
+        <el-form-item label="策略模板">
+          <el-button @click="applyPullbackTemplate">应用：半开放突破回踩</el-button>
+          <span style="color:#999; margin-left: 8px">快速填充基础参数，可再手动调整。</span>
         </el-form-item>
 
         <el-row :gutter="24">
@@ -139,12 +136,12 @@
 
         <el-row v-if="form.alertMode === 'target'" :gutter="12">
           <el-col :span="12">
-            <el-form-item label="涨幅目标价">
+            <el-form-item label="上涨目标价">
               <el-input-number v-model="form.targetPriceUp" :min="0" :step="0.01" :precision="2" style="width: 100%" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="跌幅目标价">
+            <el-form-item label="下跌目标价">
               <el-input-number v-model="form.targetPriceDown" :min="0" :step="0.01" :precision="2" style="width: 100%" />
             </el-form-item>
           </el-col>
@@ -165,19 +162,14 @@
             multiple
             filterable
             style="width: 100%"
-            placeholder="选择推送订阅（留空=只记录日志不推送）"
+            placeholder="选择推送订阅（留空=仅记录日志不推送）"
           >
-            <el-option
-              v-for="s in selectableSubscriptions"
-              :key="s.id"
-              :label="`${s.name} (${s.type})`"
-              :value="s.id"
-            />
+            <el-option v-for="s in selectableSubscriptions" :key="s.id" :label="`${s.name} (${s.type})`" :value="s.id" />
           </el-select>
         </el-form-item>
 
         <el-form-item label="股票列表" prop="symbols">
-          <el-input v-model="form.symbols" placeholder="例如：sh600519,sz000001" />
+          <el-input v-model="form.symbols" placeholder="例如：sh600519,sz000001 或 贵州茅台" />
         </el-form-item>
 
         <el-row :gutter="12">
@@ -188,7 +180,7 @@
           </el-col>
         </el-row>
 
-        <el-divider content-position="left">技术面深度分析指标：</el-divider>
+        <el-divider content-position="left">技术面深度分析指标</el-divider>
 
         <el-row :gutter="12">
           <el-col :span="12">
@@ -198,22 +190,22 @@
           </el-col>
           <el-col :span="12">
             <el-form-item label="RSI 超卖">
-              <el-switch v-model="form.enableRsiOversold" />
+              <el-switch v-model="form.enableRsiOversold" :disabled="isFreePackage" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="RSI 超买">
-              <el-switch v-model="form.enableRsiOverbought" />
+              <el-switch v-model="form.enableRsiOverbought" :disabled="isFreePackage" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="均线信号">
-              <el-switch v-model="form.enableMovingAverages" />
+              <el-switch v-model="form.enableMovingAverages" :disabled="isFreePackage" />
             </el-form-item>
           </el-col>
           <el-col :span="12">
             <el-form-item label="形态信号">
-              <el-switch v-model="form.enablePatternSignal" />
+              <el-switch v-model="form.enablePatternSignal" :disabled="isFreePackage" />
             </el-form-item>
           </el-col>
         </el-row>
@@ -228,7 +220,7 @@
       </el-form>
 
       <template #footer>
-        <el-button @click="dialogVisible=false">取消</el-button>
+        <el-button @click="dialogVisible = false">取消</el-button>
         <el-button type="primary" @click="save">保存</el-button>
       </template>
     </el-dialog>
@@ -236,18 +228,12 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
-const route = useRoute();
-const router = useRouter();
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api';
 import { useListFetcher } from '../composables/useListFetcher';
 
-// 策略列表页：
-// - 展示策略列表
-// - 提供新增/编辑/删除
-// - 在编辑弹窗内可绑定订阅（用于触发后的推送目标）
 type StrategyDto = {
   id: string;
   name: string;
@@ -278,10 +264,24 @@ type SubscriptionDto = {
   createdByUsername?: string | null;
 };
 
+type PackageInfo = {
+  userPackage: 'free' | 'vip';
+  packageExpire: string | null;
+  packageActive: boolean;
+  maxStrategyCount: number;
+  strategyCount: number;
+  remainStrategyCount: number;
+};
+
+const route = useRoute();
+const router = useRouter();
+
 const qName = ref('');
 const qUsername = ref('');
 
 const currentUser = ref<{ userId: string; username: string; role: 'admin' | 'user' } | null>(null);
+const packageInfo = ref<PackageInfo | null>(null);
+const isFreePackage = computed(() => packageInfo.value?.userPackage === 'free');
 
 const { loading, items, fetchList } = useListFetcher<StrategyDto>(async () => {
   const res = await api.get('/strategies', {
@@ -312,7 +312,6 @@ const selectableSubscriptions = computed(() => {
 const dialogVisible = ref(false);
 const editing = ref(false);
 const editingId = ref<string | null>(null);
-
 const formRef = ref<any>(null);
 
 const rules = {
@@ -322,7 +321,7 @@ const rules = {
     { required: true, message: '请输入推送时间间隔', trigger: 'change' },
     {
       validator: (_: any, value: any, cb: any) => {
-        if (typeof value !== 'number' || value < 1) return cb(new Error('推送时间间隔必须 >= 1 秒'));
+        if (typeof value !== 'number' || value < 1) return cb(new Error('推送间隔必须 >= 1 分钟'));
         cb();
       },
       trigger: 'change',
@@ -369,8 +368,32 @@ const form = ref({
   enablePatternSignal: true,
 });
 
-// 打开创建弹窗
-function openCreate(code: string) {
+function enforceFreeIndicatorConstraints() {
+  if (!isFreePackage.value) return;
+  form.value.enableRsiOversold = false;
+  form.value.enableRsiOverbought = false;
+  form.value.enableMovingAverages = false;
+  form.value.enablePatternSignal = false;
+}
+
+function applyPullbackTemplate() {
+  form.value.name = '半开放突破回踩策略';
+  form.value.marketTimeOnly = true;
+  form.value.alertMode = 'target';
+  form.value.targetPriceUp = undefined;
+  form.value.targetPriceDown = undefined;
+  form.value.intervalMs = 5;
+  form.value.cooldownMinutes = 30;
+  form.value.priceAlertPercent = 2;
+  form.value.enableMacdGoldenCross = true;
+  form.value.enableRsiOversold = true;
+  form.value.enableRsiOverbought = false;
+  form.value.enableMovingAverages = true;
+  form.value.enablePatternSignal = true;
+  enforceFreeIndicatorConstraints();
+}
+
+function openCreate(code = '') {
   fetchSubscriptions();
   editing.value = false;
   editingId.value = null;
@@ -392,16 +415,15 @@ function openCreate(code: string) {
     enableMovingAverages: false,
     enablePatternSignal: true,
   };
+  enforceFreeIndicatorConstraints();
   dialogVisible.value = true;
 }
 
-// 打开编辑弹窗
 function openEdit(row: any) {
   fetchSubscriptions();
   editing.value = true;
   editingId.value = row.id;
-  // 获取详情用于填充编辑表单（列表字段可能不全）
-  api.get(`/strategies/${row.id}`).then(res => {
+  api.get(`/strategies/${row.id}`).then((res) => {
     form.value = res.data.item;
     form.value.intervalMs = res.data.item.intervalMs ? res.data.item.intervalMs / 60000 : 1;
     (form.value as any).marketTimeOnly = res.data.item.marketTimeOnly !== false;
@@ -411,25 +433,22 @@ function openEdit(row: any) {
     if (!Array.isArray((form.value as any).subscriptionIds)) {
       (form.value as any).subscriptionIds = [];
     }
+    enforceFreeIndicatorConstraints();
     dialogVisible.value = true;
   });
 }
 
-// 保存策略：根据 editing 状态选择新增/更新
 async function save() {
   try {
     await formRef.value?.validate();
+    enforceFreeIndicatorConstraints();
 
     const alertMode = ((form.value as any).alertMode || 'percent') as 'percent' | 'target';
 
-    // 将分钟转为毫秒后保存
     const dataToSave = {
       ...form.value,
       alertMode,
       marketTimeOnly: (form.value as any).marketTimeOnly !== false,
-      // 二选一：
-      // - target 模式：只发目标价；不再使用涨跌幅阈值
-      // - percent 模式：只发涨跌幅阈值；忽略目标价
       targetPriceUp:
         alertMode === 'target' && typeof (form.value as any).targetPriceUp === 'number' && (form.value as any).targetPriceUp > 0
           ? (form.value as any).targetPriceUp
@@ -444,6 +463,7 @@ async function save() {
           : undefined,
       intervalMs: form.value.intervalMs * 60000,
     };
+
     if (editing.value && editingId.value) {
       await api.put(`/strategies/${editingId.value}`, dataToSave);
     } else {
@@ -453,7 +473,6 @@ async function save() {
     dialogVisible.value = false;
     await fetchList();
   } catch (error: any) {
-    // validate 失败或接口失败都走这里
     const msg = error?.response?.data?.message || error?.message || '保存失败';
     ElMessage.error(msg);
   }
@@ -470,9 +489,7 @@ async function remove(id: string) {
     await fetchList();
     ElMessage.success('删除成功');
   } catch (error: any) {
-    if (error === 'cancel') {
-      return;
-    }
+    if (error === 'cancel') return;
     ElMessage.error(error?.response?.data?.message || error?.message || '删除失败');
   }
 }
@@ -486,20 +503,32 @@ async function getUserInfo() {
   }
 }
 
+async function getPackageInfo() {
+  try {
+    const res = await api.get('/users/me/package');
+    packageInfo.value = res.data?.item || null;
+  } catch {
+    packageInfo.value = null;
+  }
+}
+
 function consumeCreateQueryAndOpenDialog(): void {
   const v = (route.query as any)?.create;
   const shouldOpen = v === '1' || v === 'true';
   if (!shouldOpen) return;
   const code = (route.query as any)?.code;
   openCreate(code);
-
-  // 清理 query，避免刷新/返回时重复弹窗
   const { create, ...rest } = (route.query as any) || {};
   router.replace({ path: route.path, query: rest });
 }
 
+watch(isFreePackage, () => {
+  enforceFreeIndicatorConstraints();
+});
+
 onMounted(async () => {
   await getUserInfo();
+  await getPackageInfo();
   fetchList();
   fetchSubscriptions();
   consumeCreateQueryAndOpenDialog();

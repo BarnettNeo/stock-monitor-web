@@ -27,6 +27,10 @@
             <el-icon><Files /></el-icon>
             <span>触发日志</span>
           </el-menu-item>
+          <el-menu-item index="/profile/package">
+            <el-icon><User /></el-icon>
+            <span>我的套餐</span>
+          </el-menu-item>
         </el-sub-menu>
       </el-menu>
     </el-aside>
@@ -44,7 +48,6 @@
     </el-container>
   </el-container>
 
-  <!-- 全局悬浮 AI 聊天窗口（登录页不显示） -->
   <AgentChatFloat v-if="!isAuthPage" />
 </template>
 
@@ -53,24 +56,20 @@ import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute, useRouter } from 'vue-router';
 import { api, clearAuthToken } from './api';
 import { ElMessageBox } from 'element-plus';
-import { Monitor, Setting, Document, Bell, Files } from '@element-plus/icons-vue';
+import { Monitor, Setting, Document, Bell, Files, User } from '@element-plus/icons-vue';
 import AgentChatFloat from './components/AgentChatFloat.vue';
 
 const route = useRoute();
 const router = useRouter();
 
-const isAuthPage = computed(() => {
-  return route.path.startsWith('/login') || route.path.startsWith('/register');
-});
-
-const isScreenPage = computed(() => {
-  return route.path.startsWith('/screen');
-});
+const isAuthPage = computed(() => route.path.startsWith('/login') || route.path.startsWith('/register'));
+const isScreenPage = computed(() => route.path.startsWith('/screen'));
 
 const pageTitle = computed(() => {
   if (route.path.startsWith('/screen')) return '监控大盘';
   if (route.path.startsWith('/strategies')) return '策略管理';
   if (route.path.startsWith('/subscriptions')) return '订阅管理';
+  if (route.path.startsWith('/profile/package')) return '我的套餐';
   if (route.path.startsWith('/trigger-logs')) return '触发日志';
   return 'Stock Monitor';
 });
@@ -79,7 +78,6 @@ const currentUser = ref<{ userId: string; username: string; role: 'admin' | 'use
 const currentUsername = computed(() => currentUser.value?.username || '-');
 
 async function logout() {
-  // 确定是否退出
   await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
     confirmButtonText: '确定',
     cancelButtonText: '取消',
@@ -90,7 +88,6 @@ async function logout() {
 }
 
 async function getUserInfo() {
-  // 获取用户信息
   if (isAuthPage.value) {
     currentUser.value = null;
     return;

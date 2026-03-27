@@ -27,13 +27,16 @@ export function registerAuthRoutes(app: Express): void {
       const username = parsed.username.trim();
       const userId = username;
       const role: 'admin' | 'user' = userId === AUTH_ADMIN_USER_ID ? 'admin' : 'user';
+      const userPackage: 'free' | 'vip' = role === 'admin' ? 'vip' : 'free';
+      const maxStrategyCount = role === 'admin' ? 9999 : 3;
       const salt = crypto.randomBytes(16).toString('hex');
       const hash = pbkdf2Hash(parsed.password, salt);
       const ts = nowIso();
+      const expire = new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString();
       await execute(
-        `INSERT INTO users (id,username,password_salt,password_hash,role,created_at,updated_at)
-         VALUES (?,?,?,?,?,?,?)`,
-        [userId, username, salt, hash, role, ts, ts],
+        `INSERT INTO users (id,username,password_salt,password_hash,role,user_package,package_expire,max_strategy_count,created_at,updated_at)
+         VALUES (?,?,?,?,?,?,?,?,?,?)`,
+        [userId, username, salt, hash, role, userPackage, expire, maxStrategyCount, ts, ts],
       );
       res.json({ ok: true });
     } catch (error: any) {
@@ -59,7 +62,17 @@ export function registerAuthRoutes(app: Express): void {
       const role: 'admin' | 'user' = (row as any).role === 'admin' ? 'admin' : 'user';
       const exp = Math.floor(Date.now() / 1000) + 3600 * 24 * 30;
       const token = signToken({ userId: String((row as any).id), role, exp });
-      res.json({ token, user: { userId: String((row as any).id), username: String((row as any).username), role } });
+      res.json({
+        token,
+        user: {
+          userId: String((row as any).id),
+          username: String((row as any).username),
+          role,
+          userPackage: (row as any).user_package || 'free',
+          packageExpire: (row as any).package_expire || null,
+          maxStrategyCount: Number((row as any).max_strategy_count || 0),
+        },
+      });
     } catch (error: any) {
       const { status, message } = handleApiError(error);
       res.status(status).json({ message });

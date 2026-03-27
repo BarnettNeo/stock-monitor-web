@@ -8,6 +8,7 @@ import { boolToInt, handleApiError, nowIso } from '../utils';
 import { rowToStrategy } from '../mappers';
 import { fetchStockDataBatch } from '../engine';
 import { addClause, createWhereBuilder, toWhereSql } from '../sql-utils';
+import { validateCreateStrategyPermission } from '../package-rule';
 
 // 策略管理 API
 // - 列表支持 name/username 模糊查询
@@ -151,6 +152,16 @@ export function registerStrategyRoutes(app: Express): void {
       if (!user) return;
 
       const parsed = StrategyInputSchema.parse(req.body);
+      const permission = await validateCreateStrategyPermission(user, {
+        enableRsiOversold: parsed.enableRsiOversold,
+        enableRsiOverbought: parsed.enableRsiOverbought,
+        enableMovingAverages: parsed.enableMovingAverages,
+        enablePatternSignal: parsed.enablePatternSignal,
+      });
+      if (!permission.ok) {
+        return res.status(permission.status).json({ message: permission.message, package: permission.info });
+      }
+
       const id = crypto.randomUUID();
       const ts = nowIso();
       const subCheck = await validateSubscriptionOwnership(user, parsed.subscriptionIds);

@@ -159,6 +159,17 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
             req_model=req_model,
             cfg_ok=bool(cfg.get("base_url") and cfg.get("api_key")),
         )
+    if skill and skill.executor == "subscription_management":
+        from skills.subscription_management import handle_subscription_management_skill
+
+        return await handle_subscription_management_skill(
+            user_id=user_id,
+            current_user=payload.user or {},
+            auth=auth_info,
+            message=message,
+            req_model=req_model,
+            cfg_ok=bool(cfg.get("base_url") and cfg.get("api_key")),
+        )
 
     # 无 LLM 时，先用规则兜底出 toolCalls
     if not (cfg.get("base_url") and cfg.get("api_key")):

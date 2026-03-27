@@ -9,6 +9,7 @@ import SubscriptionsPage from './views/SubscriptionsPage.vue';
 import TriggerLogsPage from './views/TriggerLogsPage.vue';
 import TriggerLogDetailPage from './views/TriggerLogDetailPage.vue';
 import ScreenHomePage from './views/ScreenHomePage.vue';
+import ProfilePackagePage from './views/ProfilePackagePage.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -19,6 +20,7 @@ export const router = createRouter({
     { path: '/screen', component: ScreenHomePage },
     { path: '/strategies', component: StrategiesPage },
     { path: '/subscriptions', component: SubscriptionsPage },
+    { path: '/profile/package', component: ProfilePackagePage },
     { path: '/trigger-logs', component: TriggerLogsPage },
     { path: '/trigger-logs/:id', component: TriggerLogDetailPage },
   ],
