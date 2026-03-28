@@ -7,8 +7,9 @@
           <div style="display:flex; gap: 8px; align-items:center">
             <el-input v-model="qName" placeholder="名称" style="width: 180px" clearable />
             <el-input v-model="qUsername" placeholder="用户名" style="width: 180px" clearable />
-            <el-button @click="fetchList">查询</el-button>
-            <el-button type="primary" @click="openCreate">新增策略</el-button>
+            <el-button @click="search">查询</el-button>
+
+            <el-button type="primary" @click="openCreate('')">新增策略</el-button>
           </div>
         </div>
       </template>
@@ -42,7 +43,7 @@
             <el-tag v-if="scope.row.enableRsiOversold" size="small" style="margin-right: 4px">RSI超卖</el-tag>
             <el-tag v-if="scope.row.enableRsiOverbought" size="small" style="margin-right: 4px">RSI超买</el-tag>
             <el-tag v-if="scope.row.enableMovingAverages" size="small" style="margin-right: 4px">均线</el-tag>
-            <el-tag v-if="scope.row.enablePatternSignal" size="small" style="margin-right: 4px">形态</el-tag>
+            <el-tag v-if="scope.row.enablePatternSignal" size="small" style="margin-right: 4px">突破回踩信号</el-tag>
             <span
               v-if="
                 !scope.row.enableMacdGoldenCross &&
@@ -93,7 +94,21 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div style="display:flex; justify-content:flex-end; margin-top: 16px">
+        <el-pagination
+          layout="total, sizes, prev, pager, next"
+          :total="total"
+          :page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :current-page="currentPage"
+          @current-change="handlePageChange"
+          @size-change="handleSizeChange"
+          hide-on-single-page
+        />
+      </div>
     </el-card>
+
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑策略' : '新增策略'" width="760px">
       <el-alert
@@ -107,11 +122,6 @@
       <el-form ref="formRef" :model="form" :rules="rules" label-width="130px">
         <el-form-item label="策略名称" prop="name">
           <el-input v-model="form.name" />
-        </el-form-item>
-
-        <el-form-item label="策略模板">
-          <el-button @click="applyPullbackTemplate">应用：半开放突破回踩</el-button>
-          <span style="color:#999; margin-left: 8px">快速填充基础参数，可再手动调整。</span>
         </el-form-item>
 
         <el-row :gutter="24">
@@ -184,7 +194,7 @@
 
         <el-row :gutter="12">
           <el-col :span="12">
-            <el-form-item label="MACD 金叉">
+            <el-form-item label="MACD 金叉/死叉">
               <el-switch v-model="form.enableMacdGoldenCross" />
             </el-form-item>
           </el-col>
@@ -204,7 +214,7 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
-            <el-form-item label="形态信号">
+            <el-form-item label="突破回踩信号">
               <el-switch v-model="form.enablePatternSignal" :disabled="isFreePackage" />
             </el-form-item>
           </el-col>
@@ -283,23 +293,62 @@ const currentUser = ref<{ userId: string; username: string; role: 'admin' | 'use
 const packageInfo = ref<PackageInfo | null>(null);
 const isFreePackage = computed(() => packageInfo.value?.userPackage === 'free');
 
-const { loading, items, fetchList } = useListFetcher<StrategyDto>(async () => {
-  const res = await api.get('/strategies', {
-    params: {
-      name: qName.value || undefined,
-      username: qUsername.value || undefined,
-    },
-  });
-  return res.data.items;
-});
+const loading = ref(false);
+const items = ref<StrategyDto[]>([]);
+const total = ref(0);
+const pageSize = ref(10);
+const currentPage = ref(1);
+
+async function fetchList() {
+  loading.value = true;
+  try {
+    const res = await api.get('/strategies', {
+      params: {
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        name: qName.value || undefined,
+        username: qUsername.value || undefined,
+      },
+    });
+    const list = Array.isArray(res.data?.items) ? res.data.items : [];
+    items.value = list;
+    total.value = typeof res.data?.total === 'number' ? res.data.total : list.length;
+  } finally {
+    loading.value = false;
+  }
+}
+
+function search() {
+  currentPage.value = 1;
+  fetchList();
+}
+
+function handlePageChange(page: number) {
+  currentPage.value = page;
+  fetchList();
+}
+
+function handleSizeChange(size: number) {
+  pageSize.value = size;
+  currentPage.value = 1;
+  fetchList();
+}
+
 
 const { items: subscriptions, fetchList: fetchSubscriptions } = useListFetcher<SubscriptionDto>(async () => {
   const params =
     currentUser.value && currentUser.value.role !== 'admin'
       ? { username: currentUser.value.username }
       : undefined;
-  const res = await api.get('/subscriptions', { params });
+  const res = await api.get('/subscriptions', {
+    params: {
+      ...(params || {}),
+      page: 1,
+      pageSize: 200,
+    },
+  });
   return res.data.items;
+
 });
 
 const selectableSubscriptions = computed(() => {
@@ -376,29 +425,13 @@ function enforceFreeIndicatorConstraints() {
   form.value.enablePatternSignal = false;
 }
 
-function applyPullbackTemplate() {
-  form.value.name = '半开放突破回踩策略';
-  form.value.marketTimeOnly = true;
-  form.value.alertMode = 'target';
-  form.value.targetPriceUp = undefined;
-  form.value.targetPriceDown = undefined;
-  form.value.intervalMs = 5;
-  form.value.cooldownMinutes = 30;
-  form.value.priceAlertPercent = 2;
-  form.value.enableMacdGoldenCross = true;
-  form.value.enableRsiOversold = true;
-  form.value.enableRsiOverbought = false;
-  form.value.enableMovingAverages = true;
-  form.value.enablePatternSignal = true;
-  enforceFreeIndicatorConstraints();
-}
 
 function openCreate(code = '') {
   fetchSubscriptions();
   editing.value = false;
   editingId.value = null;
   form.value = {
-    name: '新策略',
+    name: '',
     enabled: true,
     marketTimeOnly: true,
     symbols: code || '',
@@ -516,7 +549,7 @@ function consumeCreateQueryAndOpenDialog(): void {
   const v = (route.query as any)?.create;
   const shouldOpen = v === '1' || v === 'true';
   if (!shouldOpen) return;
-  const code = (route.query as any)?.code;
+  const code = (route.query as any)?.code || '';
   openCreate(code);
   const { create, ...rest } = (route.query as any) || {};
   router.replace({ path: route.path, query: rest });

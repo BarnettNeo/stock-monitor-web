@@ -176,6 +176,7 @@ async function migrateMySqlSchema(): Promise<void> {
       password_salt VARCHAR(128) NOT NULL,
       password_hash VARCHAR(256) NOT NULL,
       role VARCHAR(16) NOT NULL,
+      status VARCHAR(16) NOT NULL DEFAULT 'active',
       user_package VARCHAR(16) NOT NULL DEFAULT 'free',
       package_expire VARCHAR(40),
       max_strategy_count INT NOT NULL DEFAULT 3,
@@ -185,10 +186,14 @@ async function migrateMySqlSchema(): Promise<void> {
   `);
 
   // MySQL compatibility: "ADD COLUMN IF NOT EXISTS" is not supported on many versions.
+  await ensureMySqlColumn('users', 'status', "status VARCHAR(16) NOT NULL DEFAULT 'active'");
   await ensureMySqlColumn('users', 'user_package', "user_package VARCHAR(16) NOT NULL DEFAULT 'free'");
   await ensureMySqlColumn('users', 'package_expire', 'package_expire VARCHAR(40)');
   await ensureMySqlColumn('users', 'max_strategy_count', 'max_strategy_count INT NOT NULL DEFAULT 3');
 
+  await executeOnPool(
+    "UPDATE users SET status = 'active' WHERE status IS NULL OR status = ''",
+  );
   await executeOnPool(
     "UPDATE users SET user_package = 'free' WHERE user_package IS NULL OR user_package = ''",
   );

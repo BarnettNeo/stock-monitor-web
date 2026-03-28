@@ -24,6 +24,7 @@
         <div class="text-slate-300 tabular-nums">{{ displayTime }}</div>
         <el-button size="small" @click="refreshNow" :loading="loading">刷新</el-button>
         <el-button size="small" :icon="Setting" circle @click="goToStrategies" title="配置中心" />
+        <CurrentUserBar v-model:user="currentUser" button-size="small" font-size="14px" />
       </div>
     </div>
 
@@ -157,6 +158,8 @@ import type { KlineItem } from '../api/quotes';
 import { getKlineSeries } from '../api/quotes';
 import { ensureChart, setLineChart } from '../utils/charts';
 import { Setting } from '@element-plus/icons-vue';
+import CurrentUserBar from '../components/CurrentUserBar.vue';
+
 
 type TriggerDetail = {
   id: string;
@@ -177,7 +180,8 @@ type TriggerDetail = {
 
 const router = useRouter();
 
-const currentUser = ref<{ role: string } | null>(null);
+const currentUser = ref<{ userId: string; username: string; role: 'admin' | 'user' | string } | null>(null);
+
 
 const now = ref(new Date());
 const nowText = computed(() => now.value.toLocaleString('zh-CN'));
@@ -644,24 +648,17 @@ function onVisibility(): void {
   }
 }
 
-async function getUserInfo() {
-  try {
-    const res = await api.get('/auth/me');
-    currentUser.value = res.data?.user || null;
-  } catch {
-    currentUser.value = null;
-  }
-}
+
 
 onMounted(() => {
   // 页面启动：
   // - 1s 更新时钟
   // - 8s 刷新主大屏数据
   // - 10min 刷新热门涨跌榜
-  getUserInfo();
   clockTimer = window.setInterval(() => {
     now.value = new Date();
   }, 1000);
+
 
   window.addEventListener('resize', onResize);
   document.addEventListener('visibilitychange', onVisibility);

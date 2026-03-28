@@ -7,6 +7,7 @@ export type AuthedUser = {
   userId: string;
   username: string;
   role: 'admin' | 'user';
+  status?: 'pending' | 'active' | 'disabled';
   userPackage?: 'free' | 'vip';
   packageExpire?: string | null;
   maxStrategyCount?: number;
@@ -88,10 +89,14 @@ export async function requireAuth(req: Request, res: Response): Promise<AuthedUs
   }
 
   const role: 'admin' | 'user' = row.role === 'admin' ? 'admin' : 'user';
+  const statusRaw = String((row as any).status || '').toLowerCase();
+  const status: 'pending' | 'active' | 'disabled' =
+    statusRaw === 'pending' ? 'pending' : statusRaw === 'disabled' ? 'disabled' : 'active';
   return {
     userId: String(row.id),
     username: String(row.username),
     role,
+    status,
     userPackage: String((row as any).user_package || '').toLowerCase() === 'vip' ? 'vip' : 'free',
     packageExpire: (row as any).package_expire ? String((row as any).package_expire) : null,
     maxStrategyCount: Number((row as any).max_strategy_count || 0),

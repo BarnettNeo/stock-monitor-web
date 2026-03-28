@@ -61,13 +61,16 @@
 
       <div style="display:flex; justify-content:flex-end; margin-top: 16px">
         <el-pagination
-          layout="prev, pager, next"
+          layout="total, sizes, prev, pager, next"
           :total="total"
           :page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
           :current-page="currentPage"
           @current-change="handlePageChange"
+          @size-change="handleSizeChange"
           hide-on-single-page
         />
+
       </div>
     </el-card>
   </div>
@@ -99,8 +102,9 @@ const qType = ref<string | undefined>(undefined);
 const qSymbol = ref('');
 const qDateRange = ref<[string, string] | null>(null);
 
-const pageSize = 20;
+const pageSize = ref(10);
 const currentPage = ref(1);
+
 const loading = ref(false);
 const items = ref<TriggerLogDto[]>([]);
 const total = ref(0);
@@ -111,7 +115,7 @@ async function fetchList() {
     const res = await api.get('/trigger-logs', {
       params: {
         page: currentPage.value,
-        pageSize,
+        pageSize: pageSize.value,
         symbol: qSymbol.value || undefined,
         startDate: qDateRange.value && qDateRange.value.length === 2 ? qDateRange.value[0] : undefined,
         endDate: qDateRange.value && qDateRange.value.length === 2 ? qDateRange.value[1] : undefined,
@@ -149,6 +153,13 @@ function handlePageChange(page: number) {
   currentPage.value = page;
   fetchList();
 }
+
+function handleSizeChange(size: number) {
+  pageSize.value = size;
+  currentPage.value = 1;
+  fetchList();
+}
+
 
 function viewDetail(row: TriggerLogDto) {
   router.push(`/trigger-logs/${row.id}`);

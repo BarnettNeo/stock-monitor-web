@@ -7,7 +7,8 @@
           <div style="display:flex; gap: 8px; align-items:center">
             <el-input v-model="qName" placeholder="名称" style="width: 180px" clearable />
             <el-input v-model="qUsername" placeholder="用户名" style="width: 180px" clearable />
-            <el-button @click="fetchList">查询</el-button>
+            <el-button @click="search">查询</el-button>
+
             <el-button type="primary" @click="openCreate">新增订阅</el-button>
           </div>
         </div>
@@ -32,7 +33,21 @@
           </template>
         </el-table-column>
       </el-table>
+
+      <div style="display:flex; justify-content:flex-end; margin-top: 16px">
+        <el-pagination
+          layout="total, sizes, prev, pager, next"
+          :total="total"
+          :page-size="pageSize"
+          :page-sizes="[10, 20, 50, 100]"
+          :current-page="currentPage"
+          @current-change="handlePageChange"
+          @size-change="handleSizeChange"
+          hide-on-single-page
+        />
+      </div>
     </el-card>
+
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑订阅' : '新增订阅'" width="720px" align-center>
       <el-form ref="formRef" :model="form" :rules="rules" label-width="120px">
@@ -122,10 +137,11 @@
 </template>
 
 <script setup lang="ts">
-import { onMounted, reactive, ref } from 'vue';
+import { onMounted, reactive, ref, watch } from 'vue';
+
 import { ElMessage } from 'element-plus';
 import { api } from '../api';
-import { useListFetcher } from '../composables/useListFetcher';
+
 
 // 订阅管理页：
 // - 维护“推送渠道”配置（钉钉机器人/企业微信群机器人/企业微信自建应用等）
@@ -143,15 +159,51 @@ type SubscriptionDto = {
 const qName = ref('');
 const qUsername = ref('');
 
-const { loading, items, fetchList } = useListFetcher<SubscriptionDto>(async () => {
-  const res = await api.get('/subscriptions', {
-    params: {
-      name: qName.value || undefined,
-      username: qUsername.value || undefined,
-    },
-  });
-  return res.data.items;
+const loading = ref(false);
+const items = ref<SubscriptionDto[]>([]);
+const total = ref(0);
+const pageSize = ref(10);
+const currentPage = ref(1);
+
+async function fetchList() {
+  loading.value = true;
+  try {
+    const res = await api.get('/subscriptions', {
+      params: {
+        page: currentPage.value,
+        pageSize: pageSize.value,
+        name: qName.value || undefined,
+        username: qUsername.value || undefined,
+      },
+    });
+    const list = Array.isArray(res.data?.items) ? res.data.items : [];
+    items.value = list;
+    total.value = typeof res.data?.total === 'number' ? res.data.total : list.length;
+  } finally {
+    loading.value = false;
+  }
+}
+
+function search() {
+  currentPage.value = 1;
+  fetchList();
+}
+
+function handlePageChange(page: number) {
+  currentPage.value = page;
+  fetchList();
+}
+
+function handleSizeChange(size: number) {
+  pageSize.value = size;
+  currentPage.value = 1;
+  fetchList();
+}
+
+watch([qName, qUsername], () => {
+  currentPage.value = 1;
 });
+
 
 const dialogVisible = ref(false);
 const editing = ref(false);
@@ -166,7 +218,7 @@ const rules = reactive({
 });
 
 const form = ref<any>({
-  name: '默认订阅',
+  name: '',
   type: 'dingtalk',
   enabled: true,
   webhookUrl: '',
@@ -178,7 +230,7 @@ function openCreate() {
   editingId.value = null;
   // 新增时给一个更易用的默认值
   form.value = {
-    name: '默认订阅',
+    name: '',
     type: 'dingtalk',
     enabled: true,
     webhookUrl: '',

@@ -2,45 +2,65 @@
   <template v-if="isAuthPage || isScreenPage">
     <router-view />
   </template>
+
   <el-container v-else>
-    <el-aside width="220px">
-      <div style="padding: 16px; font-weight: 700">Stock Monitor</div>
-      <el-menu :default-active="$route.path" router>
+    <el-aside :width="asideWidth" class="app-aside">
+      <div class="aside-header" :class="{ collapsed: isCollapsed }">
+        <div v-if="!isCollapsed" class="brand">Stock Monitor</div>
+        <el-button
+          class="collapse-btn"
+          text
+          circle
+          :icon="isCollapsed ? Expand : Fold"
+          @click="toggleCollapse"
+          :title="isCollapsed ? '展开菜单' : '折叠菜单'"
+        />
+      </div>
+      <el-menu :default-active="$route.path" router :collapse="isCollapsed" :collapse-transition="false">
         <el-menu-item index="/screen">
           <el-icon><Monitor /></el-icon>
-          <span>监控大盘</span>
+          <span>大盘监控</span>
         </el-menu-item>
+
         <el-sub-menu index="/config">
           <template #title>
             <el-icon><Setting /></el-icon>
             <span>配置中心</span>
           </template>
+
           <el-menu-item index="/strategies">
             <el-icon><Document /></el-icon>
-            <span>策略管理</span>
+            <span>策略列表</span>
           </el-menu-item>
+
           <el-menu-item index="/subscriptions">
             <el-icon><Bell /></el-icon>
-            <span>订阅管理</span>
+            <span>订阅列表</span>
           </el-menu-item>
+
           <el-menu-item index="/trigger-logs">
             <el-icon><Files /></el-icon>
-            <span>触发日志</span>
+            <span>触发记录</span>
           </el-menu-item>
-          <el-menu-item index="/profile/package">
-            <el-icon><User /></el-icon>
-            <span>我的套餐</span>
-          </el-menu-item>
+
         </el-sub-menu>
+
+        <el-menu-item index="/profile/package">
+          <el-icon><User /></el-icon>
+          <span>个人中心</span>
+        </el-menu-item>
+
+        <el-menu-item v-if="isAdmin" index="/users">
+          <el-icon><UserFilled /></el-icon>
+          <span>用户管理</span>
+        </el-menu-item>
       </el-menu>
     </el-aside>
+
     <el-container>
       <el-header style="display:flex; align-items:center; justify-content: space-between">
         <div>{{ pageTitle }}</div>
-        <div style="display:flex; margin-left: auto; gap: 16px; font-size: 16px;">
-          <div>当前{{ currentUser?.role === 'admin' ? '管理员' : '用户' }}: {{ currentUsername }}</div>
-          <el-button link type="danger" @click="logout">退出</el-button>
-        </div>
+        <CurrentUserBar :user="currentUser" @update:user="onUserUpdate" />
       </el-header>
       <el-main>
         <router-view />
@@ -52,64 +72,68 @@
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref, watch } from 'vue';
-import { useRoute, useRouter } from 'vue-router';
-import { api, clearAuthToken } from './api';
-import { ElMessageBox } from 'element-plus';
-import { Monitor, Setting, Document, Bell, Files, User } from '@element-plus/icons-vue';
+import { computed, ref, watch } from 'vue';
+import { useRoute } from 'vue-router';
+import { Monitor, Setting, Document, Bell, Files, User, UserFilled, Fold, Expand } from '@element-plus/icons-vue';
+
 import AgentChatFloat from './components/AgentChatFloat.vue';
+import CurrentUserBar from './components/CurrentUserBar.vue';
+
+type UserInfo = {
+  userId: string;
+  username: string;
+  role: 'admin' | 'user' | string;
+  status?: string;
+};
 
 const route = useRoute();
-const router = useRouter();
+
+const COLLAPSE_KEY = 'admin_sidebar_collapsed';
+
+const isCollapsed = ref(false);
+try {
+  const raw = localStorage.getItem(COLLAPSE_KEY);
+  isCollapsed.value = raw === '1' || raw === 'true';
+} catch {
+  // ignore
+}
+
+watch(
+  () => isCollapsed.value,
+  (v: boolean) => {
+    try {
+      localStorage.setItem(COLLAPSE_KEY, v ? '1' : '0');
+    } catch {
+      // ignore
+    }
+  },
+);
+
+const asideWidth = computed(() => (isCollapsed.value ? '64px' : '220px'));
+
+function toggleCollapse() {
+  isCollapsed.value = !isCollapsed.value;
+}
+
+const currentUser = ref<UserInfo | null>(null);
+const isAdmin = computed(() => currentUser.value?.role === 'admin');
+
+function onUserUpdate(u: UserInfo | null) {
+  currentUser.value = u;
+}
 
 const isAuthPage = computed(() => route.path.startsWith('/login') || route.path.startsWith('/register'));
 const isScreenPage = computed(() => route.path.startsWith('/screen'));
 
 const pageTitle = computed(() => {
-  if (route.path.startsWith('/screen')) return '监控大盘';
-  if (route.path.startsWith('/strategies')) return '策略管理';
-  if (route.path.startsWith('/subscriptions')) return '订阅管理';
-  if (route.path.startsWith('/profile/package')) return '我的套餐';
-  if (route.path.startsWith('/trigger-logs')) return '触发日志';
+  if (route.path.startsWith('/screen')) return '大盘监控';
+  if (route.path.startsWith('/strategies')) return '策略列表';
+  if (route.path.startsWith('/subscriptions')) return '订阅列表';
+  if (route.path.startsWith('/users')) return '用户管理';
+  if (route.path.startsWith('/profile/package')) return '个人中心';
+  if (route.path.startsWith('/trigger-logs')) return '触发记录';
   return 'Stock Monitor';
 });
-
-const currentUser = ref<{ userId: string; username: string; role: 'admin' | 'user' } | null>(null);
-const currentUsername = computed(() => currentUser.value?.username || '-');
-
-async function logout() {
-  await ElMessageBox.confirm('确定要退出登录吗？', '提示', {
-    confirmButtonText: '确定',
-    cancelButtonText: '取消',
-    type: 'warning',
-  });
-  clearAuthToken();
-  router.replace('/login');
-}
-
-async function getUserInfo() {
-  if (isAuthPage.value) {
-    currentUser.value = null;
-    return;
-  }
-  try {
-    const res = await api.get('/auth/me');
-    currentUser.value = res.data?.user || null;
-  } catch {
-    currentUser.value = null;
-  }
-}
-
-onMounted(() => {
-  getUserInfo();
-});
-
-watch(
-  () => route.path,
-  () => {
-    getUserInfo();
-  },
-);
 </script>
 
 <style>
@@ -123,4 +147,27 @@ body,
 body {
   margin: 0;
 }
+
+.app-aside {
+  border-right: 1px solid rgba(0, 0, 0, 0.08);
+  overflow-x: hidden;
+}
+
+.aside-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 12px 12px 12px 16px;
+}
+
+.aside-header.collapsed {
+  justify-content: center;
+  padding: 12px;
+}
+
+.brand {
+  font-weight: 700;
+  user-select: none;
+}
 </style>
+

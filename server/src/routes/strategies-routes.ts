@@ -7,8 +7,29 @@ import { requireAuth } from '../auth';
 import { boolToInt, handleApiError, nowIso } from '../utils';
 import { rowToStrategy } from '../mappers';
 import { fetchStockDataBatch } from '../engine';
-import { addClause, createWhereBuilder, toWhereSql } from '../sql-utils';
-import { validateCreateStrategyPermission } from '../package-rule';
+import { addClause, createWhereBuilder, normalizePagination, toWhereSql } from '../sql-utils';
+import { getPackageInfoByUserId, validateCreateStrategyPermission } from '../package-rule';
+
+function normalizeName(name: string): string {
+  return String(name || '').trim().replace(/\s+/g, ' ');
+}
+
+function parseSymbolsList(symbols: string): string[] {
+  const parts = String(symbols || '')
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  // Keep order but de-dup case-insensitively
+  const out: string[] = [];
+  const seen = new Set<string>();
+  for (const p of parts) {
+    const key = p.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    out.push(p);
+  }
+  return out;
+}
 
 // 策略管理 API
 // - 列表支持 name/username 模糊查询
@@ -60,10 +81,13 @@ export function registerStrategyRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
+    const { page, pageSize, offset } = normalizePagination(req.query.page, req.query.pageSize, 100, 10);
+
     const qName = typeof req.query?.name === 'string' ? String(req.query.name).trim() : '';
     const qUsername = typeof req.query?.username === 'string' ? String(req.query.username).trim() : '';
 
     const where = createWhereBuilder();
+
     if (qName) {
       addClause(where, 's.name LIKE ?', `%${qName}%`);
     }
@@ -72,18 +96,29 @@ export function registerStrategyRoutes(app: Express): void {
     }
     const { whereSql, params } = toWhereSql(where);
 
+    const totalRow = await queryOne<{ cnt: number }>(
+      `SELECT COUNT(*) AS cnt
+       FROM strategies s
+       LEFT JOIN users u ON u.id = s.user_id
+       ${whereSql}`,
+      params,
+    );
+    const total = Number(totalRow?.cnt || 0);
+
     const rows = await query<any>(
       `SELECT s.*, u.username AS created_by_username
        FROM strategies s
        LEFT JOIN users u ON u.id = s.user_id
        ${whereSql}
-       ORDER BY s.updated_at DESC`,
-      params,
+       ORDER BY s.updated_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, pageSize, offset],
     );
     const items: any[] = rows.map((row) => ({
       ...rowToStrategy(row),
       createdByUsername: (row as any).created_by_username || (row as any).user_id || null,
     }));
+
 
     // 获取所有股票代码并查询名称
     const allSymbols = new Set<string>();
@@ -122,7 +157,8 @@ export function registerStrategyRoutes(app: Express): void {
         : '',
     }));
 
-    res.json({ items: itemsWithNames });
+    res.json({ items: itemsWithNames, page, pageSize, total });
+
   });
 
   app.get('/api/strategies/:id', async (req: Request, res: Response) => {
@@ -152,14 +188,45 @@ export function registerStrategyRoutes(app: Express): void {
       if (!user) return;
 
       const parsed = StrategyInputSchema.parse(req.body);
-      const permission = await validateCreateStrategyPermission(user, {
+      const targetUserId = user.role === 'admin' ? (parsed.userId || user.userId) : user.userId;
+
+      const name = normalizeName(parsed.name);
+      if (!name) return res.status(400).json({ message: '策略名称不能为空' });
+
+      const symbolsList = parseSymbolsList(parsed.symbols);
+      const symbols = symbolsList.join(',');
+
+      // Free users: each strategy can monitor at most 2 symbols.
+      const pkgInfo = await getPackageInfoByUserId(targetUserId);
+      if (pkgInfo.userPackage === 'free' && symbolsList.length > 2) {
+        return res.status(403).json({ message: '当前用户是免费版，无法添加更多的监听策略' });
+      }
+
+      const indicatorInput = {
         enableRsiOversold: parsed.enableRsiOversold,
         enableRsiOverbought: parsed.enableRsiOverbought,
         enableMovingAverages: parsed.enableMovingAverages,
         enablePatternSignal: parsed.enablePatternSignal,
-      });
+      };
+
+      const permission = await validateCreateStrategyPermission(
+        user.role === 'admin' && targetUserId !== user.userId
+          ? ({ userId: targetUserId, username: '', role: 'user' } as any)
+          : user,
+        indicatorInput,
+      );
       if (!permission.ok) {
-        return res.status(permission.status).json({ message: permission.message, package: permission.info });
+        return res
+          .status(permission.status)
+          .json({ message: permission.message, package: permission.info });
+      }
+
+      const dup = await queryOne<any>(
+        'SELECT id FROM strategies WHERE user_id = ? AND name = ? LIMIT 1',
+        [targetUserId, name],
+      );
+      if (dup) {
+        return res.status(400).json({ message: '策略名称已存在' });
       }
 
       const id = crypto.randomUUID();
@@ -179,10 +246,10 @@ export function registerStrategyRoutes(app: Express): void {
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           id,
-          user.userId,
-          parsed.name,
+          targetUserId,
+          name,
           boolToInt(parsed.enabled),
-          parsed.symbols,
+          symbols,
           boolToInt(parsed.marketTimeOnly !== false),
           subscriptionIdsJson,
           parsed.alertMode || 'percent',
@@ -225,6 +292,28 @@ export function registerStrategyRoutes(app: Express): void {
         return res.status(403).json({ message: 'Forbidden' });
       }
 
+      const targetUserId = user.role === 'admin' ? (parsed.userId || ownerId || null) : user.userId;
+      if (!targetUserId) return res.status(400).json({ message: 'userId is required' });
+
+      const name = normalizeName(parsed.name);
+      if (!name) return res.status(400).json({ message: '策略名称不能为空' });
+
+      const symbolsList = parseSymbolsList(parsed.symbols);
+      const symbols = symbolsList.join(',');
+
+      const pkgInfo = await getPackageInfoByUserId(targetUserId);
+      if (pkgInfo.userPackage === 'free' && symbolsList.length > 2) {
+        return res.status(403).json({ message: '当前用户是免费版，无法添加更多的监听策略' });
+      }
+
+      const dup = await queryOne<any>(
+        'SELECT id FROM strategies WHERE user_id = ? AND name = ? AND id <> ? LIMIT 1',
+        [targetUserId, name, req.params.id],
+      );
+      if (dup) {
+        return res.status(400).json({ message: '策略名称已存在' });
+      }
+
       const subCheck = await validateSubscriptionOwnership(user, parsed.subscriptionIds);
       if (!subCheck.ok) return res.status(subCheck.status).json({ message: subCheck.message });
 
@@ -239,10 +328,10 @@ export function registerStrategyRoutes(app: Express): void {
           subscription_ids_json=?,updated_at=?
         WHERE id=?`,
         [
-          user.role === 'admin' ? parsed.userId || ownerId || null : user.userId,
-          parsed.name,
+          targetUserId,
+          name,
           boolToInt(parsed.enabled),
-          parsed.symbols,
+          symbols,
           boolToInt(parsed.marketTimeOnly !== false),
           parsed.alertMode || 'percent',
           parsed.targetPriceUp ?? null,

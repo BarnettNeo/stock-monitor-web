@@ -1,45 +1,80 @@
 <template>
-  <div>
-    <el-card v-loading="loading">
+  <div style="display:flex; flex-direction: column; gap: 16px">
+    <el-card v-loading="loadingPkg">
       <template #header>
         <div style="display:flex; justify-content: space-between; align-items:center">
-          <div>我的套餐</div>
-          <el-button @click="fetchPackage">刷新</el-button>
+          <div>套餐信息</div>
+          <div>
+            <el-button @click="fetchPackage">刷新</el-button>
+            <el-button type="primary" @click="openPwdDialog">修改密码</el-button>
+          </div>
         </div>
       </template>
 
       <template v-if="pkg">
         <el-descriptions :column="1" border>
-          <el-descriptions-item label="当前套餐">
-            <el-tag :type="pkg.userPackage === 'vip' ? 'success' : 'info'">{{ packageLabel }}</el-tag>
+          <el-descriptions-item label="套餐类型">
+            <el-tag :type="pkg.userPackage === 'vip' ? 'success' : 'info'">
+              {{ pkg.userPackage === 'vip' ? '会员版' : '免费版' }}
+            </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="有效期">
             <span>{{ expireText }}</span>
             <el-tag v-if="!pkg.packageActive" type="danger" size="small" style="margin-left: 8px">已过期</el-tag>
           </el-descriptions-item>
-          <el-descriptions-item label="可创建策略上限">
+          <el-descriptions-item label="最大策略数">
             {{ pkg.maxStrategyCount }}
           </el-descriptions-item>
-          <el-descriptions-item label="已创建策略数量">
+          <el-descriptions-item label="当前策略数">
             {{ pkg.strategyCount }}
           </el-descriptions-item>
-          <el-descriptions-item label="剩余可创建策略数量">
-            <el-tag :type="pkg.remainStrategyCount > 0 ? 'success' : 'warning'">{{ pkg.remainStrategyCount }}</el-tag>
+          <el-descriptions-item label="剩余可用策略数">
+            <el-tag :type="pkg.remainStrategyCount > 0 ? 'success' : 'warning'">
+              {{ pkg.remainStrategyCount }}
+            </el-tag>
           </el-descriptions-item>
         </el-descriptions>
-
-        <el-divider />
-        <div style="color: #666; line-height: 1.8">
-          <div>免费试用版（5天）：最多 3 个监控策略，企业微信推送。</div>
-          <div>基础付费版（99 元 / 月）：最多 20 个监控策略，企业微信 / 钉钉推送，自动报告生成。</div>
-        </div>
+      </template>
+      <template v-else>
+        <el-empty description="暂无数据" />
       </template>
     </el-card>
-  </div>
+
+    <el-dialog
+      v-model="pwdDialogVisible"
+      title="修改密码"
+      width="520px"
+      :close-on-click-modal="!savingPwd"
+      :close-on-press-escape="!savingPwd"
+      :show-close="!savingPwd"
+      @closed="onPwdDialogClosed"
+    >
+      <el-form ref="pwdRef" :model="pwd" :rules="pwdRules" label-width="110px" style="max-width: 520px">
+        <el-form-item label="原密码" prop="oldPassword">
+          <el-input v-model="pwd.oldPassword" type="password" show-password autocomplete="current-password" />
+        </el-form-item>
+        <el-form-item label="新密码" prop="newPassword">
+          <el-input v-model="pwd.newPassword" type="password" show-password autocomplete="new-password" />
+          <div style="font-size: 12px; color: #909399; margin-top: 6px">
+            密码长度 6-20 位，不能包含空格
+          </div>
+        </el-form-item>
+        <el-form-item label="确认新密码" prop="confirmPassword">
+          <el-input v-model="pwd.confirmPassword" type="password" show-password autocomplete="new-password" />
+        </el-form-item>
+      </el-form>
+
+      <template #footer>
+        <el-button :disabled="savingPwd" @click="pwdDialogVisible = false">取消</el-button>
+        <el-button :disabled="savingPwd" @click="resetPwd">重置</el-button>
+        <el-button type="primary" :loading="savingPwd" @click="savePwd">保存</el-button>
+      </template>
+    </el-dialog>
+</div>
 </template>
 
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, nextTick, onMounted, reactive, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
 import { api } from '../api';
 
@@ -53,13 +88,8 @@ type PackageDto = {
   remainStrategyCount: number;
 };
 
-const loading = ref(false);
+const loadingPkg = ref(false);
 const pkg = ref<PackageDto | null>(null);
-
-const packageLabel = computed(() => {
-  if (!pkg.value) return '-';
-  return pkg.value.userPackage === 'vip' ? '基础付费版' : '免费试用版';
-});
 
 const expireText = computed(() => {
   if (!pkg.value?.packageExpire) return '-';
@@ -69,16 +99,93 @@ const expireText = computed(() => {
 });
 
 async function fetchPackage() {
-  loading.value = true;
+  loadingPkg.value = true;
   try {
     const res = await api.get('/users/me/package');
     pkg.value = res.data?.item || null;
   } catch (e: any) {
-    ElMessage.error(e?.response?.data?.message || e?.message || '获取套餐信息失败');
+    ElMessage.error(e?.response?.data?.message || e?.message || '查询套餐信息失败');
   } finally {
-    loading.value = false;
+    loadingPkg.value = false;
+  }
+}
+
+const pwdDialogVisible = ref(false);
+const pwdRef = ref<any>(null);
+const savingPwd = ref(false);
+const pwd = reactive({
+  oldPassword: '',
+  newPassword: '',
+  confirmPassword: '',
+});
+
+function openPwdDialog() {
+  pwdDialogVisible.value = true;
+}
+
+function onPwdDialogClosed() {
+  resetPwd();
+  pwdRef.value?.clearValidate?.();
+}
+
+watch(
+  () => pwdDialogVisible.value,
+  (v) => {
+    if (!v) return;
+    nextTick().then(() => {
+      pwdRef.value?.clearValidate?.();
+    });
+  },
+);
+
+function validatePassword(_rule: any, value: string, callback: any) {
+  const v = String(value || '');
+  if (v.length < 6 || v.length > 20) return callback(new Error('密码长度需要 6-20 位'));
+  if (/\s/.test(v)) return callback(new Error('密码不能包含空格'));
+  callback();
+}
+
+function validateConfirm(_rule: any, value: string, callback: any) {
+  if (String(value || '') !== String(pwd.newPassword || '')) return callback(new Error('两次输入的密码不一致'));
+  callback();
+}
+
+const pwdRules = {
+  oldPassword: [{ required: true, message: '请输入原密码', trigger: 'blur' }],
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { validator: validatePassword, trigger: 'blur' },
+  ],
+  confirmPassword: [
+    { required: true, message: '请再次输入新密码', trigger: 'blur' },
+    { validator: validateConfirm, trigger: 'blur' },
+  ],
+};
+
+function resetPwd() {
+  pwd.oldPassword = '';
+  pwd.newPassword = '';
+  pwd.confirmPassword = '';
+}
+
+async function savePwd() {
+  try {
+    await pwdRef.value?.validate();
+    savingPwd.value = true;
+    await api.put('/users/me/password', {
+      oldPassword: pwd.oldPassword,
+      newPassword: pwd.newPassword,
+    });
+    ElMessage.success('密码修改成功');
+    pwdDialogVisible.value = false;
+    resetPwd();
+  } catch (e: any) {
+    ElMessage.error(e?.response?.data?.message || e?.message || '密码修改失败');
+  } finally {
+    savingPwd.value = false;
   }
 }
 
 onMounted(fetchPackage);
 </script>
+

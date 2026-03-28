@@ -6,7 +6,7 @@ import { execute, query, queryOne } from '../db';
 import { requireAuth } from '../auth';
 import { boolToInt, handleApiError, nowIso } from '../utils';
 import { rowToSubscription } from '../mappers';
-import { addClause, createWhereBuilder, toWhereSql } from '../sql-utils';
+import { addClause, createWhereBuilder, normalizePagination, toWhereSql } from '../sql-utils';
 
 // 订阅管理 API
 // - 列表支持 name/username 模糊查询
@@ -32,15 +32,22 @@ const SubscriptionInputSchema = z.object({
     .optional(),
 });
 
+function normalizeName(name: string): string {
+  return String(name || '').trim().replace(/\s+/g, ' ');
+}
+
 export function registerSubscriptionRoutes(app: Express): void {
   app.get('/api/subscriptions', async (req: Request, res: Response) => {
     const user = await requireAuth(req, res);
     if (!user) return;
 
+    const { page, pageSize, offset } = normalizePagination(req.query.page, req.query.pageSize, 100, 10);
+
     const qName = typeof req.query?.name === 'string' ? String(req.query.name).trim() : '';
     const qUsername = typeof req.query?.username === 'string' ? String(req.query.username).trim() : '';
 
     const where = createWhereBuilder();
+
     if (qName) {
       addClause(where, 's.name LIKE ?', `%${qName}%`);
     }
@@ -49,20 +56,31 @@ export function registerSubscriptionRoutes(app: Express): void {
     }
     const { whereSql, params } = toWhereSql(where);
 
+    const totalRow = await queryOne<{ cnt: number }>(
+      `SELECT COUNT(*) AS cnt
+       FROM subscriptions s
+       LEFT JOIN users u ON u.id = s.user_id
+       ${whereSql}`,
+      params,
+    );
+    const total = Number(totalRow?.cnt || 0);
+
     const rows = await query<any>(
       `SELECT s.*, u.username AS created_by_username
        FROM subscriptions s
        LEFT JOIN users u ON u.id = s.user_id
        ${whereSql}
-       ORDER BY s.updated_at DESC`,
-      params,
+       ORDER BY s.updated_at DESC
+       LIMIT ? OFFSET ?`,
+      [...params, pageSize, offset],
     );
     const items: any[] = rows.map((row) => ({
       ...rowToSubscription(row),
       createdByUsername: (row as any).created_by_username || (row as any).user_id || null,
     }));
 
-    res.json({ items });
+    res.json({ items, page, pageSize, total });
+
   });
 
   app.get('/api/subscriptions/:id', async (req: Request, res: Response) => {
@@ -93,6 +111,17 @@ export function registerSubscriptionRoutes(app: Express): void {
       if (!user) return;
 
       const parsed = SubscriptionInputSchema.parse(req.body);
+      const targetUserId = user.role === 'admin' ? (parsed.userId || user.userId) : user.userId;
+
+      const name = normalizeName(parsed.name);
+      if (!name) return res.status(400).json({ message: '订阅名称不能为空' });
+
+      const dup = await queryOne<any>(
+        'SELECT id FROM subscriptions WHERE user_id = ? AND name = ? LIMIT 1',
+        [targetUserId, name],
+      );
+      if (dup) return res.status(400).json({ message: '订阅名称已存在' });
+
       const id = crypto.randomUUID();
       const ts = nowIso();
       await execute(
@@ -103,8 +132,8 @@ export function registerSubscriptionRoutes(app: Express): void {
         ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           id,
-          user.userId,
-          parsed.name,
+          targetUserId,
+          name,
           parsed.type,
           boolToInt(parsed.enabled),
           parsed.webhookUrl || null,
@@ -144,6 +173,18 @@ export function registerSubscriptionRoutes(app: Express): void {
         return res.status(403).json({ message: 'Forbidden' });
       }
 
+      const targetUserId = user.role === 'admin' ? (parsed.userId || ownerId || null) : user.userId;
+      if (!targetUserId) return res.status(400).json({ message: 'userId is required' });
+
+      const name = normalizeName(parsed.name);
+      if (!name) return res.status(400).json({ message: '订阅名称不能为空' });
+
+      const dup = await queryOne<any>(
+        'SELECT id FROM subscriptions WHERE user_id = ? AND name = ? AND id <> ? LIMIT 1',
+        [targetUserId, name, req.params.id],
+      );
+      if (dup) return res.status(400).json({ message: '订阅名称已存在' });
+
       await execute(
         `UPDATE subscriptions SET
           user_id=?,name=?,type=?,enabled=?,webhook_url=?,keyword=?,
@@ -151,8 +192,8 @@ export function registerSubscriptionRoutes(app: Express): void {
           updated_at=?
         WHERE id=?`,
         [
-          user.role === 'admin' ? parsed.userId || ownerId || null : user.userId,
-          parsed.name,
+          targetUserId,
+          name,
           parsed.type,
           boolToInt(parsed.enabled),
           parsed.webhookUrl || null,

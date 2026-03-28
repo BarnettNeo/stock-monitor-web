@@ -16,6 +16,7 @@ import { registerStrategyRoutes } from './routes/strategies-routes';
 import { registerSubscriptionRoutes } from './routes/subscriptions-routes';
 import { registerTriggerLogRoutes } from './routes/trigger-logs-routes';
 import { registerAgentRoutes } from './routes/agent-routes';
+import { registerUserRoutes } from './routes/users-routes';
 
 /**
  * server 主入口：
@@ -42,6 +43,7 @@ app.get('/openapi.json', (_req: Request, res: Response) => {
 app.use('/api-docs', (swaggerUi.serve as any), (swaggerUi.setup(openapiDoc as any) as any));
 
 registerAuthRoutes(app);
+registerUserRoutes(app);
 registerDashboardRoutes(app);
 registerQuoteRoutes(app);
 registerPackageRoutes(app);
