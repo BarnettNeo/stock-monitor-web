@@ -3,8 +3,10 @@ param(
   [string]$User = "root",
   [string]$RemoteRoot = "/var/stock-monitor-web",
   [string]$Pm2Name = "stock-monitor-server",
+  [string]$AgentsPm2Name = "stock-monitor-agents",
   [switch]$SkipFrontendBuild,
-  [switch]$SkipBackendBuild
+  [switch]$SkipBackendBuild,
+  [switch]$SkipAgentsDeploy
 )
 
 $ErrorActionPreference = "Stop"
@@ -18,12 +20,14 @@ function Require-Command([string]$name) {
 Require-Command "scp"
 Require-Command "ssh"
 Require-Command "yarn"
+Require-Command "tar"
 
 $projectRoot = Split-Path -Parent $MyInvocation.MyCommand.Path
 
 $adminDir = Join-Path $projectRoot 'admin'
 $adminDistDir = Join-Path $adminDir 'dist'
 $serverDir = Join-Path $projectRoot 'server'
+$agentsDir = Join-Path $projectRoot 'agents'
 
 $remoteTarget = "${User}@${ServerHost}"
 $remoteRootTarget = "${remoteTarget}:${RemoteRoot}"
@@ -54,9 +58,23 @@ $tempTarBackend = [System.IO.Path]::GetTempFileName() + ".tar.gz"
 tar -czf "$tempTarBackend" -C "$serverDir" --exclude='node_modules' .
 
 scp "$tempTarBackend" "${remoteTarget}:${RemoteRoot}/server.tar.gz"
+Remove-Item -Force "$tempTarBackend" -ErrorAction SilentlyContinue
+
+if (-not $SkipAgentsDeploy) {
+  Write-Host "== Upload agents (python service) =="
+  $tempTarAgents = [System.IO.Path]::GetTempFileName() + ".tar.gz"
+
+  # 打包 agents，排除缓存与编译产物
+  tar -czf "$tempTarAgents" -C "$agentsDir" --exclude='__pycache__' --exclude='*.pyc' --exclude='*.pyo' --exclude='.venv' .
+
+  scp "$tempTarAgents" "${remoteTarget}:${RemoteRoot}/agents.tar.gz"
+  Remove-Item -Force "$tempTarAgents" -ErrorAction SilentlyContinue
+}
 
 $remoteCmd = @()
 $remoteCmd += "set -e"
+
+# --- backend ---
 $remoteCmd += "cd $RemoteRoot/server"
 $remoteCmd += "tar -xzf ../server.tar.gz --overwrite"
 $remoteCmd += "rm ../server.tar.gz"
@@ -66,6 +84,24 @@ if (-not $SkipBackendBuild) {
 }
 $remoteCmd += "pm2 restart $Pm2Name || pm2 restart dist/index.js --name $Pm2Name"
 $remoteCmd += "pm2 save || true"
+
+# --- agents (python) ---
+if (-not $SkipAgentsDeploy) {
+  $remoteCmd += "mkdir -p $RemoteRoot/agents"
+  $remoteCmd += "cd $RemoteRoot/agents"
+  $remoteCmd += "tar -xzf ../agents.tar.gz --overwrite"
+  $remoteCmd += "rm ../agents.tar.gz"
+
+  # 依赖安装：使用 venv，避免污染系统 python
+  $remoteCmd += "command -v python3 >/dev/null 2>&1 || (echo 'python3 not found on server' && exit 1)"
+  $remoteCmd += "[ -x .venv/bin/python ] || python3 -m venv .venv"
+  $remoteCmd += ".venv/bin/pip install -U pip"
+  $remoteCmd += ".venv/bin/pip install -r requirements.txt"
+
+  # 用 pm2 守护 uvicorn（端口从 AGENTS_PORT 读取，默认 8009）
+  $remoteCmd += 'pm2 restart ' + $AgentsPm2Name + ' || pm2 start .venv/bin/python --name ' + $AgentsPm2Name + ' -- -m uvicorn main:app --host 0.0.0.0 --port ${AGENTS_PORT:-8009}'
+  $remoteCmd += "pm2 save || true"
+}
 
 Write-Host "== Remote: install/build/restart =="
 ssh "$remoteTarget" ($remoteCmd -join "; ")
