@@ -2,23 +2,24 @@
   <div>
     <el-card>
       <template #header>
-        <div style="display:flex; justify-content: space-between; align-items:center">
-          <div>订阅列表</div>
-          <div style="display:flex; gap: 8px; align-items:center">
-            <el-input v-model="qName" placeholder="名称" style="width: 180px" clearable />
-            <el-input v-model="qUsername" placeholder="用户名" style="width: 180px" clearable />
-            <el-button @click="search">查询</el-button>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="font-bold">订阅列表</div>
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <el-input v-model="qName" placeholder="名称" class="w-full sm:w-44" clearable />
+            <el-input v-model="qUsername" placeholder="用户名" class="w-full sm:w-44" clearable />
+            <el-button class="w-full sm:w-auto" @click="search">查询</el-button>
 
-            <el-button type="primary" @click="openCreate">新增订阅</el-button>
+            <el-button class="w-full sm:w-auto !ml-0" type="primary" @click="openCreate">新增订阅</el-button>
           </div>
         </div>
       </template>
 
-      <el-table :data="items" style="width: 100%" v-loading="loading">
-        <el-table-column prop="name" label="名称" />
-        <el-table-column prop="webhookUrl" label="Webhook" />
-        <el-table-column prop="createdByUsername" label="创建人" width="250" />
-        <el-table-column prop="type" label="类型" width="120" />
+      <div class="table-scroll">
+        <el-table :data="items" style="width: 100%" v-loading="loading">
+          <el-table-column prop="name" label="名称" min-width="140" />
+          <el-table-column v-if="!isMobile" prop="webhookUrl" label="Webhook" min-width="240" />
+          <el-table-column prop="createdByUsername" label="创建人" width="250" />
+          <el-table-column prop="type" label="类型" width="120" />
         <el-table-column prop="enabled" label="启用" width="80">
           <template #default="scope">
             <el-tag :type="scope.row.enabled ? 'success' : 'info'">
@@ -26,15 +27,16 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="110">
+        <el-table-column label="操作" width="112" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-button link type="danger" @click="remove(scope.row.id)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+        </el-table>
+      </div>
 
-      <div style="display:flex; justify-content:flex-end; margin-top: 16px">
+      <div style="display:flex; justify-content:flex-end; margin-top: 1rem">
         <el-pagination
           layout="total, sizes, prev, pager, next"
           :total="total"
@@ -69,14 +71,14 @@
         </el-form-item>
 
         <el-form-item label="获取说明">
-          <div style="display:flex; gap: 8px; flex-wrap: wrap; align-items: center;">
-            <el-popover placement="top-start" :width="560" trigger="click">
+          <div style="display:flex; gap: 0.5rem; flex-wrap: wrap; align-items: center;">
+            <el-popover placement="top-start" :width="!isMobile ? 560 : 320" trigger="click">
               <template #reference>
                 <el-button size="small">钉钉 Webhook 获取</el-button>
               </template>
-              <div style="font-size: 13px; line-height: 1.6;">
-                <div style="font-weight: 700; margin-bottom: 6px;">钉钉自定义机器人 Webhook URL 获取（钉钉开放平台）</div>
-                <ol style="padding-left: 18px; margin: 0;">
+              <div style="font-size: 0.8125rem; line-height: 1.6;">
+                <div style="font-weight: 700; margin-bottom: 0.375rem;">钉钉自定义机器人 Webhook URL 获取（钉钉开放平台）</div>
+                <ol style="padding-left: 1.125rem; margin: 0;">
                   <li>打开钉钉，进入目标群聊（仅支持群聊）。</li>
                   <li>点击群聊右上角 → 设置图标 → 选择 群管理 → 机器人。</li>
                   <li>点击 添加机器人 → 选择 自定义。</li>
@@ -84,7 +86,7 @@
                   <li>勾选协议，点击 完成。</li>
                   <li>生成后直接复制 Webhook 地址（格式：https://oapi.dingtalk.com/robot/send?access_token=xxx）</li>
                 </ol>
-                <div style="margin-top: 8px;">
+                <div style="margin-top: 0.5rem;">
                   <el-alert
                     title="安全提示"
                     type="warning"
@@ -96,20 +98,20 @@
               </div>
             </el-popover>
 
-            <el-popover placement="top-start" :width="560" trigger="click">
+            <el-popover placement="top-start" :width="!isMobile ? 560 : 320" trigger="click">
               <template #reference>
-                <el-button size="small">企业微信 Webhook 获取</el-button>
+                <el-button class="!ml-0" size="small">企业微信 Webhook 获取</el-button>
               </template>
-              <div style="font-size: 13px; line-height: 1.6;">
-                <div style="font-weight: 700; margin-bottom: 6px;">企业微信自定义机器人 Webhook URL 获取</div>
-                <ol style="padding-left: 18px; margin: 0;">
+              <div style="font-size: 0.8125rem; line-height: 1.6;">
+                <div style="font-weight: 700; margin-bottom: 0.375rem;">企业微信自定义机器人 Webhook URL 获取</div>
+                <ol style="padding-left: 1.125rem; margin: 0;">
                   <li>打开企业微信，进入目标群聊。</li>
                   <li>点击群聊右上角 → 更多 → 选择 添加群机器人。</li>
                   <li>选择 新创建一个机器人。</li>
                   <li>填写机器人名称，点击 添加机器人。</li>
                   <li>生成后直接复制地址（格式：https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx）</li>
                 </ol>
-                <div style="margin-top: 8px;">
+                <div style="margin-top: 0.5rem;">
                   <el-alert
                     title="安全提示"
                     type="warning"
@@ -141,6 +143,9 @@ import { onMounted, reactive, ref, watch } from 'vue';
 
 import { ElMessage } from 'element-plus';
 import { api } from '../api';
+import { useIsMobile } from '../composables/useIsMobile';
+
+const { isMobile } = useIsMobile();
 
 
 // 订阅管理页：

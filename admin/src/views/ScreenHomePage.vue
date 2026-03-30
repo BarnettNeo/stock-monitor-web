@@ -1,7 +1,10 @@
 <template>
-  <div class="screen text-slate-200 p-4 box-border flex flex-col h-full">
-    <div class="panel panel--strong flex items-center justify-between p-3 px-4">
-      <div class="text-xl font-extrabold tracking-wide">监控大盘</div>
+  <div class="screen text-slate-200 p-4 box-border flex flex-col min-h-full">
+    <div :class="!isMobile ? 'flex' : 'flex-col'" class="panel panel--strong flex items-center justify-between p-3 px-4">
+      <div class="flex items-center  justify-between">
+        <span class="text-xl font-extrabold tracking-wide">监控大盘</span>
+        <div v-if="isMobile" class="ml-2">{{ displayTime }}</div>
+      </div>
       <!-- 监控大盘卡片 -->
       <div>
         <template v-if="currentUser && currentUser.role !== 'admin' && data?.kpis?.monitoredSymbols === 0">
@@ -11,7 +14,7 @@
             </div>
         </template>
         <template v-else>
-          <div class="grid grid-cols-4 gap-24 max-[1280px]:grid-cols-2">
+          <div class="grid grid-cols-4 max-[1280px]:grid-cols-2" :class="!isMobile ? 'gap-24 ' : 'gap-1'">
             <div v-for="c in kpiCards" :key="c.label" class="flex flex items-center justify-center gap-4">
               <div class="kpi-label">{{ c.label }}</div>
               <div class="kpi-value tabular-nums">{{ c.value }}</div>
@@ -20,8 +23,8 @@
         </template>
       </div>
 
-      <div class="flex gap-2 items-center">
-        <div class="text-slate-300 tabular-nums">{{ displayTime }}</div>
+      <div class="flex items-center" :class="!isMobile ? 'gap-2 ' : 'gap-1'">
+        <div v-if="!isMobile" class="text-slate-300 tabular-nums">{{ displayTime }}</div>
         <el-button size="small" @click="refreshNow" :loading="loading">刷新</el-button>
         <el-button size="small" :icon="Setting" circle @click="goToStrategies" title="配置中心" />
         <CurrentUserBar v-model:user="currentUser" button-size="small" font-size="14px" />
@@ -39,6 +42,7 @@
               <div
                 v-for="(item, idx) in feedLoopItems"
                 :key="item.id + '-' + idx"
+                :class="!isMobile ? 'grid-cols-[200px_1fr] ' : 'grid-cols-[100px_1fr]'"
                 class="grid grid-cols-[200px_1fr] gap-2 p-2 rounded cursor-pointer hover:bg-slate-400/10"
                 @click="openTrigger(item.id)"
                 :aria-hidden="idx >= feedItems.length ? 'true' : undefined"
@@ -65,7 +69,7 @@
       </div>
 
       <!-- 最近一次异动详情卡片 -->
-      <div class="panel p-3">
+      <div v-if="!isMobile" class="panel p-3">
         <div class="panel-title">最近一次异动详情</div>
         <div v-loading="detailLoading">
           <div v-if="!detail" class="text-slate-400 p-6">暂无触发详情</div>
@@ -93,7 +97,7 @@
             v-model="focusSymbol"
             placeholder="请选择股票"
             filterable
-            class="!w-[220px]"
+            :class="!isMobile ? '!w-[220px]' : '!w-[180px] mb-2'"
             :disabled="focusSymbolOptions.length === 0"
           >
             <el-option v-for="s in focusSymbolOptions" :key="s.code" :label="s.name" :value="s.code" />
@@ -106,13 +110,13 @@
       </div>
 
       <!-- 热门股票分析 -->
-      <div class="panel p-3">
+      <div v-if="!isMobile" class="panel p-3">
         <div class="panel-title">热门股票分析</div>
         <div class="h-[200px]"></div>
       </div>
     </div>
     <!-- 近3日上涨股票卡片 -->
-    <div class="gap-3 mt-3 max-[1280px]:grid-cols-1 flex flex-1 min-h-0">
+    <div v-if="!isMobile" class="gap-3 mt-3 max-[1280px]:grid-cols-1 flex flex-1 min-h-0">
       <div v-for="block in hotBlocks" :key="block.key" class="panel p-3 flex flex-col w-[50%] h-full">
         <div class="flex items-baseline justify-between">
           <div class="panel-title mb-0">{{ block.title }}</div>
@@ -159,7 +163,9 @@ import { getKlineSeries } from '../api/quotes';
 import { ensureChart, setLineChart } from '../utils/charts';
 import { Setting } from '@element-plus/icons-vue';
 import CurrentUserBar from '../components/CurrentUserBar.vue';
+import { useIsMobile } from '../composables/useIsMobile';
 
+const { isMobile } = useIsMobile();
 
 type TriggerDetail = {
   id: string;

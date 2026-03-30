@@ -2,11 +2,11 @@
   <div>
     <el-card>
       <template #header>
-        <div style="display:flex; justify-content: space-between; align-items:center">
-          <div>用户管理</div>
-          <div style="display:flex; gap: 8px; align-items:center; flex-wrap: wrap">
-            <el-input v-model="q.username" placeholder="用户名" style="width: 160px" clearable />
-            <el-select v-model="q.packageType" placeholder="套餐类型" style="width: 140px" clearable>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="font-bold">用户管理</div>
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:flex-wrap sm:justify-end">
+            <el-input v-model="q.username" placeholder="用户名" class="w-full sm:w-40" clearable />
+            <el-select v-model="q.packageType" placeholder="套餐类型" class="w-full sm:w-36" clearable>
               <el-option label="免费版" value="free" />
               <el-option label="会员版" value="vip" />
             </el-select>
@@ -15,7 +15,7 @@
               type="datetime"
               placeholder="有效期开始"
               value-format="YYYY-MM-DDTHH:mm:ss.SSS[Z]"
-              style="width: 190px"
+              class="w-full sm:w-48"
               clearable
             />
             <el-date-picker
@@ -23,21 +23,22 @@
               type="datetime"
               placeholder="有效期结束"
               value-format="YYYY-MM-DDTHH:mm:ss.SSS[Z]"
-              style="width: 190px"
+              class="w-full sm:w-48"
               clearable
             />
-            <el-select v-model="q.status" placeholder="状态" style="width: 140px" clearable>
+            <el-select v-model="q.status" placeholder="状态" class="w-full sm:w-36" clearable>
               <el-option label="待审核" value="pending" />
               <el-option label="正常" value="active" />
               <el-option label="禁用" value="disabled" />
             </el-select>
-            <el-button @click="fetchList">搜索</el-button>
-            <el-button type="primary" @click="openCreate">新增用户</el-button>
+            <el-button class="w-full sm:w-auto" @click="fetchList">搜索</el-button>
+            <el-button class="w-full sm:w-auto" type="primary" @click="openCreate">新增用户</el-button>
           </div>
         </div>
       </template>
 
-      <el-table :data="items" style="width: 100%" v-loading="loading">
+      <div class="table-scroll">
+        <el-table :data="items" style="width: 100%" v-loading="loading">
         <el-table-column prop="username" label="用户名" />
         <el-table-column prop="userPackage" label="套餐类型" width="120">
           <template #default="scope">
@@ -46,7 +47,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column prop="packageExpire" label="套餐有效期" width="200">
+        <el-table-column v-if="!isMobile" prop="packageExpire" label="套餐有效期" width="200">
           <template #default="scope">
             {{ formatDate(scope.row.packageExpire) }}
           </template>
@@ -58,7 +59,7 @@
             </el-tag>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="200">
+        <el-table-column label="操作" width="200" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-button
@@ -72,7 +73,8 @@
             <el-button link type="danger" @click="remove(scope.row.userId)">删除</el-button>
           </template>
         </el-table-column>
-      </el-table>
+        </el-table>
+      </div>
     </el-card>
 
     <el-dialog v-model="dialogVisible" :title="editing ? '编辑用户' : '新增用户'" width="720px" align-center>
@@ -82,7 +84,7 @@
         </el-form-item>
         <el-form-item :label="editing ? '重置密码(可选)' : '密码'" prop="password">
           <el-input v-model="form.password" type="password" show-password autocomplete="new-password" />
-          <div style="font-size: 12px; color: #909399; margin-top: 6px">
+          <div style="font-size: 0.75rem; color: #909399; margin-top: 0.375rem">
             密码长度 6-20 位，不能包含空格
           </div>
         </el-form-item>
@@ -126,6 +128,9 @@
 import { onMounted, reactive, ref } from 'vue';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api';
+import { useIsMobile } from '../composables/useIsMobile';
+
+const { isMobile } = useIsMobile();
 
 type UserItem = {
   userId: string;
@@ -297,4 +302,3 @@ async function remove(id: string) {
 
 onMounted(fetchList);
 </script>
-

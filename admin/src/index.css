@@ -1,3 +1,64 @@
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
+
+@layer base {
+  html {
+    -webkit-text-size-adjust: 100%;
+    text-size-adjust: 100%;
+    font-size: 16px;
+  }
+
+  body {
+    background: #f6f7f9;
+  }
+}
+
+/* Mobile-first ergonomics */
+@media (max-width: 768px) {
+  /* Make tap targets more forgiving */
+  .el-button.is-link {
+    padding: 10px 8px;
+    min-height: 40px;
+  }
+
+  .el-menu-item {
+    height: 52px;
+    line-height: 52px;
+  }
+
+  /* Dialogs: make forms usable on small screens */
+  .el-dialog {
+    width: calc(100vw - 24px) !important;
+    max-width: 560px !important;
+    margin: 12px auto !important;
+  }
+
+  .el-dialog__body {
+    max-height: calc(100vh - 180px);
+    overflow: auto;
+    -webkit-overflow-scrolling: touch;
+    overflow-x: hidden;
+  }
+
+  /* Cards/panels */
+  .el-card {
+    border-radius: 12px;
+  }
+
+  /* Pagination tends to overflow */
+  .el-pagination {
+    flex-wrap: wrap;
+    row-gap: 8px;
+  }
+
+  /* Tables: allow horizontal scroll rather than squeezing columns */
+  .table-scroll {
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+  }
+
+  .table-scroll .el-table {
+    min-width: 720px;
+  }
+}

@@ -334,4 +334,22 @@ watch(
   justify-content: space-between;
   margin-top: 8px;
 }
+
+@media (max-width: 768px) {
+  .agent-float-root {
+    right: 10px;
+    bottom: 10px;
+  }
+
+  .agent-float-panel {
+    width: calc(100vw - 20px);
+    height: calc(100vh - 70px);
+    max-height: calc(100vh - 20px);
+    border-radius: 14px;
+  }
+
+  .agent-float-model {
+    width: 120px;
+  }
+}
 </style>

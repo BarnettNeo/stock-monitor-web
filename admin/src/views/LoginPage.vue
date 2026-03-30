@@ -1,9 +1,9 @@
 <template>
   <div
     class="page-container"
-    style="width: 100%; height: 100%; display:flex; align-items:center; justify-content:center; padding: 24px"
+    style="width: 100%; height: 100%; display:flex; align-items:center; justify-content:center; padding: 1.5rem"
   >
-    <el-card style="width: 420px">
+    <el-card style="width: 26.25rem">
       <template #header>
         <div style="font-weight: 700">登录</div>
       </template>
@@ -16,12 +16,12 @@
           <el-input v-model="form.password" type="password" show-password autocomplete="current-password" />
         </el-form-item>
         <el-form-item label="验证码" prop="captchaCode">
-          <div style="display:flex; gap: 10px; align-items:center; width: 100%">
+          <div style="display:flex; gap: 0.625rem; align-items:center; width: 100%">
             <el-input v-model="form.captchaCode" autocomplete="off" placeholder="请输入验证码" />
             <el-image
               v-if="captchaImage"
               :src="captchaImage"
-              style="width: 120px; height: 40px; border-radius: 6px; cursor: pointer; user-select:none"
+              style="width: 7.5rem; height: 2.5rem; border-radius: 0.375rem; cursor: pointer; user-select:none"
               fit="contain"
               @click="refreshCaptcha"
             />
@@ -46,8 +46,10 @@ import { computed, onMounted, reactive, ref } from 'vue';
 import { useRouter } from 'vue-router';
 import { ElMessage } from 'element-plus';
 import { api, setAuthToken } from '../api';
+import { useIsMobile } from '../composables/useIsMobile';
 
 const router = useRouter();
+const { isMobile } = useIsMobile();
 
 const formRef = ref<any>(null);
 const loading = ref(false);
@@ -124,4 +126,3 @@ onMounted(refreshCaptcha);
   box-sizing: border-box;
 }
 </style>
-

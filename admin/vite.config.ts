@@ -13,6 +13,8 @@ export default defineConfig({
     },
   },
   server: {
+    // 允许通过本机 IP（如 192.168.x.x:5173）访问开发服务
+    host: '0.0.0.0',
     port: 5173,
     fs: {
       allow: [path.resolve(__dirname, '..')],

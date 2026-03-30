@@ -1,5 +1,5 @@
 <template>
-  <div style="display:flex; flex-direction: column; gap: 16px">
+  <div style="display:flex; flex-direction: column; gap: 1rem">
     <el-card v-loading="loadingPkg">
       <template #header>
         <div style="display:flex; justify-content: space-between; align-items:center">
@@ -19,8 +19,8 @@
             </el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="有效期">
-            <span>{{ expireText }}</span>
-            <el-tag v-if="!pkg.packageActive" type="danger" size="small" style="margin-left: 8px">已过期</el-tag>
+           <span>{{ expireText }}</span>
+            <el-tag v-if="!pkg.packageActive" type="danger" size="small" style="margin-left: 0.5rem">已过期</el-tag>
           </el-descriptions-item>
           <el-descriptions-item label="最大策略数">
             {{ pkg.maxStrategyCount }}
@@ -55,7 +55,7 @@
         </el-form-item>
         <el-form-item label="新密码" prop="newPassword">
           <el-input v-model="pwd.newPassword" type="password" show-password autocomplete="new-password" />
-          <div style="font-size: 12px; color: #909399; margin-top: 6px">
+          <div style="font-size: 0.75rem; color: #909399; margin-top: 0.375rem">
             密码长度 6-20 位，不能包含空格
           </div>
         </el-form-item>
@@ -188,4 +188,3 @@ async function savePwd() {
 
 onMounted(fetchPackage);
 </script>
-

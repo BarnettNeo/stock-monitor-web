@@ -2,10 +2,10 @@
   <div>
     <el-card>
       <template #header>
-        <div style="display:flex; justify-content: space-between; align-items:center">
-          <div>触发日志</div>
-          <div style="display:flex; align-items:center; gap: 12px">
-            <el-select v-model="qType" placeholder="全部类型" clearable style="width: 140px">
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="font-bold">触发日志</div>
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <el-select v-model="qType" placeholder="全部类型" clearable class="w-full sm:w-36">
               <el-option label="价格异动" value="price" />
               <el-option label="指标信号" value="indicator" />
               <el-option label="形态信号" value="pattern" />
@@ -14,7 +14,7 @@
               v-model="qSymbol"
               placeholder="全部股票"
               clearable
-              style="width: 160px"
+              class="w-full sm:w-40"
             />
             <el-date-picker
               v-model="qDateRange"
@@ -23,43 +23,46 @@
               start-placeholder="开始日期"
               end-placeholder="结束日期"
               value-format="YYYY-MM-DD"
+              class="w-full sm:w-auto"
             />
-            <el-button @click="search">搜索</el-button>
+            <el-button class="w-full sm:w-auto" @click="search">搜索</el-button>
           </div>
         </div>
       </template>
 
-      <el-table :data="items" style="width: 100%" v-loading="loading">
-        <el-table-column prop="createdAt" label="触发时间" width="180">
+      <div class="table-scroll">
+        <el-table :data="items" style="width: 100%" v-loading="loading">
+          <el-table-column prop="createdAt" label="触发时间" :width="isMobile ? 150 : 180">
           <template #default="scope">
             {{ formatDate(scope.row.createdAt) }}
           </template>
-        </el-table-column>
-        <el-table-column prop="symbol" label="股票" min-width="160">
+          </el-table-column>
+          <el-table-column prop="symbol" label="股票" min-width="160">
           <template #default="scope">
             {{ scope.row.symbol }} {{ scope.row.stockName || '' }}
           </template>
-        </el-table-column>
-        <el-table-column prop="reason" label="异动类型" min-width="220">
+          </el-table-column>
+          <el-table-column prop="reason" label="异动类型" min-width="220">
           <template #default="scope">
             {{ scope.row.reason }}
           </template>
-        </el-table-column>
-        <el-table-column prop="sendStatus" label="推送状态" width="120">
+          </el-table-column>
+          <el-table-column prop="sendStatus" label="推送状态" width="120">
           <template #default="scope">
             <el-tag v-if="scope.row.sendStatus === 'SENT'" type="success">成功</el-tag>
             <el-tag v-else-if="scope.row.sendStatus === 'FAILED'" type="danger">失败</el-tag>
             <el-tag v-else type="info">未推送</el-tag>
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="100" fixed="right">
+          </el-table-column>
+          <el-table-column v-if="!isMobile" label="操作" width="100" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="viewDetail(scope.row)">查看</el-button>
           </template>
-        </el-table-column>
-      </el-table>
+          </el-table-column>
+        </el-table>
+      </div>
 
-      <div style="display:flex; justify-content:flex-end; margin-top: 16px">
+      <div style="display:flex; justify-content:flex-end; margin-top: 1rem">
         <el-pagination
           layout="total, sizes, prev, pager, next"
           :total="total"
@@ -80,6 +83,9 @@
 import { onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import { api } from '../api';
+import { useIsMobile } from '../composables/useIsMobile';
+
+const { isMobile } = useIsMobile();
 
 type TriggerLogDto = {
   id: string;

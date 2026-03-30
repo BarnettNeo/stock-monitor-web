@@ -3,6 +3,15 @@ import type { Express, Request, Response } from 'express';
 import { query, queryOne } from '../db';
 import { requireAuth } from '../auth';
 import { fetchRecentPriceData, calculateIndicatorSnapshot } from '../engine';
+
+function safeJsonParse<T>(raw: unknown, fallback: T): T {
+  if (typeof raw !== 'string') return fallback;
+  try {
+    return JSON.parse(raw) as T;
+  } catch {
+    return fallback;
+  }
+}
 import {
   addClause,
   addDatePrefixRange,
@@ -80,47 +89,81 @@ export function registerTriggerLogRoutes(app: Express): void {
     const user = await requireAuth(req, res);
     if (!user) return;
 
-    const row = await queryOne<any>('SELECT * FROM trigger_logs WHERE id = ? LIMIT 1', [
-      req.params.id,
-    ]);
+    try {
+      const id = String(req.params.id || '').trim();
+      // 常见误用：客户端把 ":id" 当成字面量传过来
+      if (!id || id === ':id') {
+        res.status(400).json({ message: 'Invalid id' });
+        return;
+      }
 
-    if (!row) {
-      res.status(404).json({ message: 'Not found' });
-      return;
+      const params: any[] = [id];
+      let sql = 'SELECT * FROM trigger_logs WHERE id = ?';
+      // 普通用户只能看自己的触发记录（避免越权）
+      if (user.role !== 'admin') {
+        sql += ' AND user_id = ?';
+        params.push(user.userId);
+      }
+      sql += ' LIMIT 1';
+
+      const row = await queryOne<any>(sql, params);
+
+      if (!row) {
+        res.status(404).json({ message: 'Not found' });
+        return;
+      }
+
+      const snapshot = safeJsonParse<any>((row as any).snapshot_json, null);
+      const item = {
+        id: row.id,
+        createdAt: formatDate(row.created_at),
+        userId: row.user_id,
+        strategyId: row.strategy_id,
+        subscriptionId: row.subscription_id,
+        symbol: row.symbol,
+        stockName: row.stock_name || undefined,
+        reason: row.reason,
+        snapshot,
+        sendStatus: row.send_status || undefined,
+        sendError: row.send_error || undefined,
+      };
+
+      // 外部行情服务可能失败：这里兜底为空数组，避免接口整体 500
+      let klineRaw: any[] = [];
+      try {
+        const got = await fetchRecentPriceData(item.symbol, '1');
+        klineRaw = Array.isArray(got) ? got : [];
+      } catch {
+        klineRaw = [];
+      }
+
+      const settled = await Promise.allSettled(
+        klineRaw.map(async (k) => {
+          let indicator: any = null;
+          try {
+            indicator = await calculateIndicatorSnapshot(item.symbol, Number((k as any).close));
+          } catch {
+            indicator = null;
+          }
+          return {
+            date: (k as any).time,
+            open: (k as any).open,
+            close: (k as any).close,
+            high: (k as any).high,
+            low: (k as any).low,
+            volume: (k as any).volume,
+            indicator,
+          };
+        }),
+      );
+
+      const kline = settled
+        .filter((r): r is PromiseFulfilledResult<any> => r.status === 'fulfilled')
+        .map((r) => r.value);
+
+      res.json({ item: { ...item, kline } });
+    } catch (e: any) {
+      res.status(500).json({ message: 'Internal Server Error', error: String(e?.message || e || '') });
     }
-
-    const snapshot = JSON.parse((row as any).snapshot_json);
-    const item = {
-      id: row.id,
-      createdAt: formatDate(row.created_at),
-      userId: row.user_id,
-      strategyId: row.strategy_id,
-      subscriptionId: row.subscription_id,
-      symbol: row.symbol,
-      stockName: row.stock_name || undefined,
-      reason: row.reason,
-      snapshot,
-      sendStatus: row.send_status || undefined,
-      sendError: row.send_error || undefined,
-    };
-
-    const klineRaw = await fetchRecentPriceData(item.symbol, '1');
-
-    const kline = await Promise.all(
-      klineRaw.map(async (k) => {
-        const indicator = await calculateIndicatorSnapshot(item.symbol, k.close);
-        return {
-          date: k.time,
-          open: k.open,
-          close: k.close,
-          high: k.high,
-          low: k.low,
-          volume: k.volume,
-          indicator,
-        };
-      }),
-    );
-
-    res.json({ item: { ...item, kline } });
   });
 }

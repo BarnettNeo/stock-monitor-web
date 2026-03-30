@@ -1,9 +1,9 @@
 <template>
   <div
     class="page-container"
-    style="height: 100%; display:flex; align-items:center; justify-content:center; padding: 24px"
+    style="height: 100%; display:flex; align-items:center; justify-content:center; padding: 1.5rem"
   >
-    <el-card style="width: 460px">
+    <el-card style="width: 28.75rem">
       <template #header>
         <div style="font-weight: 700">注册</div>
       </template>
@@ -14,7 +14,7 @@
         </el-form-item>
         <el-form-item label="密码" prop="password">
           <el-input v-model="form.password" type="password" show-password autocomplete="new-password" />
-          <div style="font-size: 12px; color: #909399; margin-top: 6px">
+          <div style="font-size: 0.75rem; color: #909399; margin-top: 0.375rem">
             密码长度 6-20 位，不能包含空格
           </div>
         </el-form-item>
@@ -111,4 +111,3 @@ async function submit() {
   box-sizing: border-box;
 }
 </style>
-

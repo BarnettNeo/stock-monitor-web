@@ -2,23 +2,24 @@
   <div>
     <el-card>
       <template #header>
-        <div style="display:flex; justify-content: space-between; align-items:center">
-          <div>策略列表</div>
-          <div style="display:flex; gap: 8px; align-items:center">
-            <el-input v-model="qName" placeholder="名称" style="width: 180px" clearable />
-            <el-input v-model="qUsername" placeholder="用户名" style="width: 180px" clearable />
-            <el-button @click="search">查询</el-button>
+        <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+          <div class="font-bold">策略列表</div>
+          <div class="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-end">
+            <el-input v-model="qName" placeholder="名称" class="w-full sm:w-44" clearable />
+            <el-input v-model="qUsername" placeholder="用户名" class="w-full sm:w-44" clearable />
+            <el-button class="w-full sm:w-auto" @click="search">查询</el-button>
 
-            <el-button type="primary" @click="openCreate('')">新增策略</el-button>
+            <el-button class="w-full sm:w-auto !ml-0" type="primary" @click="openCreate('')">新增策略</el-button>
           </div>
         </div>
       </template>
 
-      <el-table :data="items" style="width: 100%" v-loading="loading">
-        <el-table-column prop="name" label="名称" />
-        <el-table-column prop="symbols" label="股票代码" min-width="150" />
-        <el-table-column prop="stockNames" label="股票名称" min-width="200" />
-        <el-table-column prop="alertMode" label="告警方式" min-width="260">
+      <div class="table-scroll">
+        <el-table :data="items" style="width: 100%" v-loading="loading">
+          <el-table-column prop="name" label="名称" min-width="140" />
+          <el-table-column prop="symbols" label="股票代码" min-width="140" />
+          <el-table-column prop="stockNames" label="股票名称" min-width="150" />
+          <el-table-column prop="alertMode" label="告警方式" min-width="250">
           <template #default="scope">
             <template v-if="scope.row.alertMode === 'target'">
               目标价触发
@@ -31,19 +32,19 @@
               <span style="color: #666">（阈值: {{ scope.row.priceAlertPercent ?? '-' }}%）</span>
             </template>
           </template>
-        </el-table-column>
-        <el-table-column prop="intervalMs" label="推送间隔(分)" width="120">
+          </el-table-column>
+          <el-table-column v-if="!isMobile" prop="intervalMs" label="推送间隔(分)" width="120">
           <template #default="scope">
             {{ typeof scope.row.intervalMs === 'number' ? scope.row.intervalMs / 60000 : '-' }}
           </template>
-        </el-table-column>
-        <el-table-column label="技术指标" min-width="220">
+          </el-table-column>
+          <el-table-column v-if="!isMobile" label="技术指标" min-width="220">
           <template #default="scope">
-            <el-tag v-if="scope.row.enableMacdGoldenCross" size="small" style="margin-right: 4px">MACD</el-tag>
-            <el-tag v-if="scope.row.enableRsiOversold" size="small" style="margin-right: 4px">RSI超卖</el-tag>
-            <el-tag v-if="scope.row.enableRsiOverbought" size="small" style="margin-right: 4px">RSI超买</el-tag>
-            <el-tag v-if="scope.row.enableMovingAverages" size="small" style="margin-right: 4px">均线</el-tag>
-            <el-tag v-if="scope.row.enablePatternSignal" size="small" style="margin-right: 4px">突破回踩信号</el-tag>
+            <el-tag v-if="scope.row.enableMacdGoldenCross" size="small" style="margin-right: 0.25rem">MACD</el-tag>
+            <el-tag v-if="scope.row.enableRsiOversold" size="small" style="margin-right: 0.25rem">RSI超卖</el-tag>
+            <el-tag v-if="scope.row.enableRsiOverbought" size="small" style="margin-right: 0.25rem">RSI超买</el-tag>
+            <el-tag v-if="scope.row.enableMovingAverages" size="small" style="margin-right: 0.25rem">均线</el-tag>
+            <el-tag v-if="scope.row.enablePatternSignal" size="small" style="margin-right: 0.25rem">突破回踩信号</el-tag>
             <span
               v-if="
                 !scope.row.enableMacdGoldenCross &&
@@ -57,9 +58,9 @@
               -
             </span>
           </template>
-        </el-table-column>
-        <el-table-column prop="cooldownMinutes" label="冷却(分)" width="100" />
-        <el-table-column label="推送方式" width="120">
+          </el-table-column>
+          <el-table-column v-if="!isMobile" prop="cooldownMinutes" label="冷却(分)" width="100" />
+          <el-table-column v-if="!isMobile" label="推送方式" width="120">
           <template #default="scope">
             <template v-for="subId in (scope.row.subscriptionIds || [])" :key="subId">
               <el-tag
@@ -68,34 +69,35 @@
                 v-show="sub.id === subId"
                 :type="sub.type === 'dingtalk' ? 'primary' : 'success'"
                 size="small"
-                style="margin-right: 4px"
+                style="margin-right: 0.25rem"
               >
                 {{ sub.type === 'dingtalk' ? '钉钉' : '企微' }}
               </el-tag>
             </template>
             <span v-if="!scope.row.subscriptionIds?.length" style="color: #999">-</span>
           </template>
-        </el-table-column>
-        <el-table-column prop="enabled" label="启用" width="80">
+          </el-table-column>
+          <el-table-column prop="enabled" label="启用" width="75">
           <template #default="scope">
             <el-tag :type="scope.row.enabled ? 'success' : 'info'">{{ scope.row.enabled ? '是' : '否' }}</el-tag>
           </template>
-        </el-table-column>
-        <el-table-column prop="createdByUsername" label="创建人" width="100" />
-        <el-table-column prop="marketTimeOnly" label="交易时间" width="100">
+          </el-table-column>
+          <el-table-column v-if="!isMobile" prop="createdByUsername" label="创建人" width="100" />
+          <el-table-column v-if="!isMobile" prop="marketTimeOnly" label="交易时间" width="100">
           <template #default="scope">
             <span style="color: #666">{{ scope.row.marketTimeOnly === false ? '不限' : '仅交易时段' }}</span>
           </template>
-        </el-table-column>
-        <el-table-column label="操作" width="110">
+          </el-table-column>
+          <el-table-column label="操作" width="112" fixed="right">
           <template #default="scope">
             <el-button link type="primary" @click="openEdit(scope.row)">编辑</el-button>
             <el-button link type="danger" @click="remove(scope.row.id)">删除</el-button>
           </template>
-        </el-table-column>
-      </el-table>
+          </el-table-column>
+        </el-table>
+      </div>
 
-      <div style="display:flex; justify-content:flex-end; margin-top: 16px">
+      <div style="display:flex; justify-content:flex-end; margin-top: 1rem">
         <el-pagination
           layout="total, sizes, prev, pager, next"
           :total="total"
@@ -115,17 +117,17 @@
         v-if="isFreePackage"
         type="warning"
         :closable="false"
-        style="margin-bottom: 12px"
+        style="margin-bottom: 0.75rem"
         title="免费版创建策略仅支持基础配置，RSI超卖 / RSI超买 / 均线信号 / 形态信号已限制。"
       />
 
-      <el-form ref="formRef" :model="form" :rules="rules" label-width="130px">
+      <el-form ref="formRef" :model="form" :rules="rules" :label-width="!isMobile ? '130px' : 'auto'">
         <el-form-item label="策略名称" prop="name">
           <el-input v-model="form.name" />
         </el-form-item>
 
         <el-row :gutter="24">
-          <el-col :span="12">
+          <el-col :span="11">
             <el-form-item label="启用">
               <el-switch v-model="form.enabled" />
             </el-form-item>
@@ -145,22 +147,40 @@
         </el-form-item>
 
         <el-row v-if="form.alertMode === 'target'" :gutter="12">
-          <el-col :span="12">
+          <el-col :span="!isMobile ? 12 : 24">
             <el-form-item label="上涨目标价">
-              <el-input-number v-model="form.targetPriceUp" :min="0" :step="0.01" :precision="2" style="width: 100%" />
+              <el-input-number
+                v-model="form.targetPriceUp"
+                :min="0"
+                :step="0.01"
+                :precision="2"
+                style="width: 100%"
+              />
             </el-form-item>
           </el-col>
-          <el-col :span="12">
+          <el-col :span="!isMobile ? 12 : 24">
             <el-form-item label="下跌目标价">
-              <el-input-number v-model="form.targetPriceDown" :min="0" :step="0.01" :precision="2" style="width: 100%" />
+              <el-input-number
+                v-model="form.targetPriceDown"
+                :min="0"
+                :step="0.01"
+                :precision="2"
+                style="width: 100%"
+              />
             </el-form-item>
           </el-col>
         </el-row>
 
         <el-row v-else :gutter="12">
-          <el-col :span="12">
+          <el-col :span="!isMobile ? 12 : 24">
             <el-form-item label="涨跌幅阈值(%)" prop="priceAlertPercent">
-              <el-input-number v-model="form.priceAlertPercent" :min="0.01" :step="0.01" :precision="2" style="width: 100%" />
+              <el-input-number
+                v-model="form.priceAlertPercent"
+                :min="0.01"
+                :step="0.01"
+                :precision="2"
+                style="width: 100%"
+              />
             </el-form-item>
           </el-col>
           <el-col :span="12" />
@@ -183,9 +203,17 @@
         </el-form-item>
 
         <el-row :gutter="12">
-          <el-col :span="12">
-            <el-form-item label="推送时间间隔(分)" prop="intervalMs">
-              <el-input-number v-model="form.intervalMs" :min="1" :step="1" style="width: 100%" />
+          <el-col :span="!isMobile ? 12 : 24">
+            <el-form-item label="推送间隔(分)" prop="intervalMs">
+              <el-input-number v-if="!isMobile" v-model="form.intervalMs" :min="1" :step="1" style="width: 100%" />
+              <el-input
+                v-else
+                :model-value="form.intervalMs == null ? '' : String(form.intervalMs)"
+                @update:model-value="(v:any) => setNumField('intervalMs', v, { min: 1, integer: true })"
+                type="number"
+                inputmode="numeric"
+                placeholder="1"
+              />
             </el-form-item>
           </el-col>
         </el-row>
@@ -194,7 +222,7 @@
 
         <el-row :gutter="12">
           <el-col :span="12">
-            <el-form-item label="MACD 金叉/死叉">
+            <el-form-item label="MACD金叉/死叉">
               <el-switch v-model="form.enableMacdGoldenCross" />
             </el-form-item>
           </el-col>
@@ -221,7 +249,7 @@
         </el-row>
 
         <el-row :gutter="24">
-          <el-col :span="12">
+          <el-col :span="!isMobile ? 12 : 24">
             <el-form-item label="冷却时间(分)" prop="cooldownMinutes">
               <el-input-number v-model="form.cooldownMinutes" :min="1" :step="1" style="width: 100%" />
             </el-form-item>
@@ -243,6 +271,30 @@ import { useRoute, useRouter } from 'vue-router';
 import { ElMessage, ElMessageBox } from 'element-plus';
 import { api } from '../api';
 import { useListFetcher } from '../composables/useListFetcher';
+import { useIsMobile } from '../composables/useIsMobile';
+
+const { isMobile } = useIsMobile();
+
+function setNumField(
+  key: string,
+  raw: unknown,
+  opts: { min?: number; precision?: number; integer?: boolean } = {},
+): void {
+  const s = String(raw ?? '').trim();
+  if (!s) {
+    (form.value as any)[key] = undefined;
+    return;
+  }
+
+  let n = Number(s);
+  if (!Number.isFinite(n)) return;
+
+  if (opts.integer) n = Math.trunc(n);
+  if (typeof opts.min === 'number' && n < opts.min) n = opts.min;
+  if (typeof opts.precision === 'number') n = Number(n.toFixed(opts.precision));
+
+  (form.value as any)[key] = n;
+}
 
 type StrategyDto = {
   id: string;

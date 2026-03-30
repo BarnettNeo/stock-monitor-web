@@ -100,6 +100,14 @@ onMounted(() => {
 <style scoped>
 .current-user-bar {
   white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  max-width: 60vw;
+}
+
+@media (max-width: 768px) {
+  .current-user-bar {
+    max-width: 52vw;
+  }
 }
 </style>
-
