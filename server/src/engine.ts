@@ -35,6 +35,8 @@ export type Strategy = {
   enableRsiOversold: boolean;
   enableRsiOverbought: boolean;
   enableMovingAverages: boolean;
+  enableVolumeSignal: boolean;
+  volumeMultiplier: number;
   enablePatternSignal: boolean;
 };
 
@@ -70,6 +72,20 @@ export type IndicatorSnapshot = {
     ma20: number;
     ma60: number;
     trend: 'ABOVE_ALL' | 'BELOW_ALL' | 'MIXED';
+    previousClose?: number;
+    signals?: {
+      ma5?: 'BREAKOUT' | 'BREAKDOWN';
+      ma10?: 'BREAKOUT' | 'BREAKDOWN';
+      ma20?: 'BREAKOUT' | 'BREAKDOWN';
+      ma60?: 'BREAKOUT' | 'BREAKDOWN';
+    };
+  };
+  volume?: {
+    currentVolume: number;
+    averageVolume: number;
+    ratio: number;
+    multiplier: number;
+    status: 'SURGE' | 'SHRINK' | 'NORMAL';
   };
 };
 
@@ -205,6 +221,28 @@ async function fetchHistoryCloses(code: string, period: string = '1'): Promise<n
   return closes.filter((c: number) => !isNaN(c));
 }
 
+// 获取历史成交量
+async function fetchHistoryVolumes(code: string, period: string = '1'): Promise<number[]> {
+  const url = `https://quotes.sina.cn/cn/api/json_v2.php/CN_MarketDataService.getKLineData?symbol=${code}&scale=${period}&datalen=240`;
+  const response = await axios.get(url, {
+    timeout: 5000,
+    headers: {
+      'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36',
+      Referer: 'https://finance.sina.com.cn/',
+    },
+  });
+
+  const klines = response.data;
+  if (!Array.isArray(klines) || klines.length === 0) return [];
+
+  const volumes = klines.map((k: any) => {
+    const raw = k.volume !== undefined ? k.volume : k.vol;
+    const n = Number(raw);
+    return Number.isFinite(n) ? n : NaN;
+  });
+  return volumes.filter((v: number) => !isNaN(v));
+}
+
 // 获取最近价格数据的内部实现函数
 export async function fetchKLineData(
   code: string,
@@ -270,6 +308,8 @@ export async function fetchRecentPriceData(code: string, period: string = '1'): 
 export async function calculateIndicatorSnapshot(
   code: string,
   currentPrice: number,
+  currentVolume?: number,
+  volumeMultiplier?: number,
 ): Promise<IndicatorSnapshot | null> {
   const closes = await fetchHistoryCloses(code, '1');
   if (closes.length < 60) return null;
@@ -300,14 +340,79 @@ export async function calculateIndicatorSnapshot(
   if (lastRsi >= 70) rsiStatus = 'OVERBOUGHT';
   else if (lastRsi <= 30) rsiStatus = 'OVERSOLD';
 
-  const ma5 = SMA.calculate({ values: closes, period: 5 }).pop() || 0;
-  const ma10 = SMA.calculate({ values: closes, period: 10 }).pop() || 0;
-  const ma20 = SMA.calculate({ values: closes, period: 20 }).pop() || 0;
-  const ma60 = SMA.calculate({ values: closes, period: 60 }).pop() || 0;
+  const previousClose = closes[closes.length - 1];
+  const closesForCurrent = closes.slice(0, -1).concat([currentPrice]);
+
+  const ma5Prev = SMA.calculate({ values: closes, period: 5 }).pop() || 0;
+  const ma10Prev = SMA.calculate({ values: closes, period: 10 }).pop() || 0;
+  const ma20Prev = SMA.calculate({ values: closes, period: 20 }).pop() || 0;
+  const ma60Prev = SMA.calculate({ values: closes, period: 60 }).pop() || 0;
+
+  const ma5 = SMA.calculate({ values: closesForCurrent, period: 5 }).pop() || 0;
+  const ma10 = SMA.calculate({ values: closesForCurrent, period: 10 }).pop() || 0;
+  const ma20 = SMA.calculate({ values: closesForCurrent, period: 20 }).pop() || 0;
+  const ma60 = SMA.calculate({ values: closesForCurrent, period: 60 }).pop() || 0;
 
   let maTrend: 'ABOVE_ALL' | 'BELOW_ALL' | 'MIXED' = 'MIXED';
   if (currentPrice > ma5 && currentPrice > ma10 && currentPrice > ma20 && currentPrice > ma60) maTrend = 'ABOVE_ALL';
   else if (currentPrice < ma5 && currentPrice < ma10 && currentPrice < ma20 && currentPrice < ma60) maTrend = 'BELOW_ALL';
+
+  const signals: NonNullable<NonNullable<IndicatorSnapshot['movingAverages']>['signals']> = {};
+  const calcSignal = (
+    prevClose: number,
+    prevMa: number,
+    curClose: number,
+    curMa: number,
+  ): 'BREAKOUT' | 'BREAKDOWN' | null => {
+    if (!Number.isFinite(prevClose) || !Number.isFinite(prevMa) || !Number.isFinite(curClose) || !Number.isFinite(curMa)) {
+      return null;
+    }
+    if (prevMa === 0 || curMa === 0) return null;
+    if (prevClose <= prevMa && curClose > curMa) return 'BREAKOUT';
+    if (prevClose >= prevMa && curClose < curMa) return 'BREAKDOWN';
+    return null;
+  };
+
+  const s5 = calcSignal(previousClose, ma5Prev, currentPrice, ma5);
+  const s10 = calcSignal(previousClose, ma10Prev, currentPrice, ma10);
+  const s20 = calcSignal(previousClose, ma20Prev, currentPrice, ma20);
+  const s60 = calcSignal(previousClose, ma60Prev, currentPrice, ma60);
+
+  if (s5) signals.ma5 = s5;
+  if (s10) signals.ma10 = s10;
+  if (s20) signals.ma20 = s20;
+  if (s60) signals.ma60 = s60;
+
+  let volume: IndicatorSnapshot['volume'] | undefined;
+  if (
+    typeof currentVolume === 'number' &&
+    Number.isFinite(currentVolume) &&
+    currentVolume > 0 &&
+    typeof volumeMultiplier === 'number' &&
+    Number.isFinite(volumeMultiplier) &&
+    volumeMultiplier > 1
+  ) {
+    const volumes = await fetchHistoryVolumes(code, '1');
+    const lookback = 20;
+    if (volumes.length >= lookback + 1) {
+      const base = volumes.slice(-(lookback + 1), -1);
+      const sum = base.reduce((acc, v) => acc + (Number.isFinite(v) ? v : 0), 0);
+      const averageVolume = sum / base.length;
+      if (Number.isFinite(averageVolume) && averageVolume > 0) {
+        const ratio = currentVolume / averageVolume;
+        let status: 'SURGE' | 'SHRINK' | 'NORMAL' = 'NORMAL';
+        if (ratio >= volumeMultiplier) status = 'SURGE';
+        else if (ratio <= 1 / volumeMultiplier) status = 'SHRINK';
+        volume = {
+          currentVolume: Number(currentVolume.toFixed(0)),
+          averageVolume: Number(averageVolume.toFixed(0)),
+          ratio: Number(ratio.toFixed(2)),
+          multiplier: Number(volumeMultiplier.toFixed(2)),
+          status,
+        };
+      }
+    }
+  }
 
   return {
     macd: {
@@ -326,7 +431,10 @@ export async function calculateIndicatorSnapshot(
       ma20: Number(ma20.toFixed(2)),
       ma60: Number(ma60.toFixed(2)),
       trend: maTrend,
+      previousClose: Number(previousClose.toFixed(2)),
+      signals: Object.keys(signals).length > 0 ? signals : undefined,
     },
+    volume,
   };
 }
 
@@ -411,10 +519,16 @@ export async function runStrategyOnce(strategy: Strategy): Promise<TriggerEvent[
       strategy.enableMacdGoldenCross ||
       strategy.enableRsiOversold ||
       strategy.enableRsiOverbought ||
-      strategy.enableMovingAverages;
+      strategy.enableMovingAverages ||
+      strategy.enableVolumeSignal;
 
     if (needIndicator) {
-      const indicator = await calculateIndicatorSnapshot(stock.code, stock.currentPrice);
+      const indicator = await calculateIndicatorSnapshot(
+        stock.code,
+        stock.currentPrice,
+        stock.volume,
+        strategy.volumeMultiplier,
+      );
       if (!indicator) continue;
 
       if (strategy.enableMacdGoldenCross && indicator.macd?.trend === 'BULLISH') {
@@ -459,16 +573,51 @@ export async function runStrategyOnce(strategy: Strategy): Promise<TriggerEvent[
         }
       }
 
-      if (strategy.enableMovingAverages && indicator.movingAverages?.trend === 'ABOVE_ALL') {
-        const key = `${strategy.id}:${stock.code}:均线多头排列 (趋势偏多)`;
+      if (strategy.enableMovingAverages) {
+        const ma = indicator.movingAverages;
+        const signals = ma?.signals;
+        if (ma && signals) {
+          const mapping: Record<string, { label: string; ma: number }> = {
+            ma5: { label: '5日均线', ma: ma.ma5 },
+            ma10: { label: '10日均线', ma: ma.ma10 },
+            ma20: { label: '20日均线', ma: ma.ma20 },
+            ma60: { label: '60日均线', ma: ma.ma60 },
+          };
+
+          for (const [k, v] of Object.entries(signals)) {
+            const meta = mapping[k];
+            if (!meta) continue;
+            const reason = v === 'BREAKOUT'
+              ? `突破 ${meta.label} (MA=${meta.ma.toFixed(2)})`
+              : `跌破 ${meta.label} (MA=${meta.ma.toFixed(2)})`;
+            const key = `${strategy.id}:${stock.code}:${reason}`;
+            const last = lastIndicatorSentAt.get(key) || 0;
+            if (indicatorCooldownMs <= 0 || nowMs - last >= indicatorCooldownMs) {
+              lastIndicatorSentAt.set(key, nowMs);
+              events.push({
+                symbol: stock.code,
+                stockName: stock.name,
+                reason,
+                snapshot: { stock, indicator },
+              });
+            }
+          }
+        }
+      }
+
+      if (strategy.enableVolumeSignal && indicator.volume && indicator.volume.status !== 'NORMAL') {
+        const reason = indicator.volume.status === 'SURGE'
+          ? `成交量放量 (x${indicator.volume.ratio.toFixed(2)})`
+          : `成交量缩量 (x${indicator.volume.ratio.toFixed(2)})`;
+        const key = `${strategy.id}:${stock.code}:${reason}`;
         const last = lastIndicatorSentAt.get(key) || 0;
         if (indicatorCooldownMs <= 0 || nowMs - last >= indicatorCooldownMs) {
           lastIndicatorSentAt.set(key, nowMs);
           events.push({
             symbol: stock.code,
             stockName: stock.name,
-            reason: '均线多头排列 (趋势偏多)',
-            snapshot: { stock, indicator },
+            reason,
+            snapshot: { stock, indicator, threshold: { volumeMultiplier: strategy.volumeMultiplier } },
           });
         }
       }

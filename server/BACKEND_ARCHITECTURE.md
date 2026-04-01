@@ -133,7 +133,7 @@
 职责：
 
 - 从外部行情接口批量拉取股票最新数据：`fetchStockDataBatch(codes)`
-- 计算技术指标快照：MACD / RSI / 均线
+- 计算技术指标快照：MACD / RSI / 均线（MA5/10/20/60 突破/跌破）/ 成交量（放量/缩量）
 - 根据策略配置产生触发事件：`runStrategyOnce(strategy)`
 
 核心策略概念：
@@ -143,6 +143,8 @@
   - `target`：使用 `targetPriceUp` / `targetPriceDown` 做目标价触发
 - `cooldownMinutes`：冷却时间（同一策略、同一股票、同一原因在冷却期内不重复推送）
 - `marketTimeOnly`：只在交易时间推送
+- 均线信号：对 MA5/10/20/60 进行“突破/跌破”检测（上一根收盘 vs 上一根 MA，与当前价 vs 当前 MA 交叉判定）
+- 成交量信号：以近 20 根 K 线均量为基准，`ratio = 当前成交量 / 平均成交量`；当 `ratio >= volumeMultiplier` 视为放量、当 `ratio <= 1/volumeMultiplier` 视为缩量（默认 `volumeMultiplier=1.5`）
 
 ### 3.8 推送与消息模板
 
@@ -231,6 +233,8 @@
   - `enable_rsi_oversold`
   - `enable_rsi_overbought`
   - `enable_moving_averages`
+  - `enable_volume_signal`
+  - `volume_multiplier` (DOUBLE)：放量/缩量倍数阈值（默认 1.5）
   - `enable_pattern_signal`
 - `subscription_ids_json` (TEXT)：JSON 数组字符串
 - `created_at` / `updated_at` (VARCHAR)：ISO 字符串

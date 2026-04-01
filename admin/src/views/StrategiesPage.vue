@@ -44,6 +44,9 @@
             <el-tag v-if="scope.row.enableRsiOversold" size="small" style="margin-right: 0.25rem">RSI超卖</el-tag>
             <el-tag v-if="scope.row.enableRsiOverbought" size="small" style="margin-right: 0.25rem">RSI超买</el-tag>
             <el-tag v-if="scope.row.enableMovingAverages" size="small" style="margin-right: 0.25rem">均线</el-tag>
+            <el-tag v-if="scope.row.enableVolumeSignal" size="small" style="margin-right: 0.25rem">
+              成交量x{{ scope.row.volumeMultiplier ?? 1.5 }}
+            </el-tag>
             <el-tag v-if="scope.row.enablePatternSignal" size="small" style="margin-right: 0.25rem">突破回踩信号</el-tag>
             <span
               v-if="
@@ -51,6 +54,7 @@
                 !scope.row.enableRsiOversold &&
                 !scope.row.enableRsiOverbought &&
                 !scope.row.enableMovingAverages &&
+                !scope.row.enableVolumeSignal &&
                 !scope.row.enablePatternSignal
               "
               style="color: #999"
@@ -118,7 +122,7 @@
         type="warning"
         :closable="false"
         style="margin-bottom: 0.75rem"
-        title="免费版创建策略仅支持基础配置，RSI超卖 / RSI超买 / 均线信号 / 形态信号已限制。"
+        title="免费版创建策略仅支持基础配置，RSI超卖 / RSI超买 / 均线信号 / 成交量信号 / 形态信号已限制。"
       />
 
       <el-form ref="formRef" :model="form" :rules="rules" :label-width="!isMobile ? '130px' : 'auto'">
@@ -242,6 +246,22 @@
             </el-form-item>
           </el-col>
           <el-col :span="12">
+            <el-form-item label="成交量放量/缩量">
+              <el-switch v-model="form.enableVolumeSignal" :disabled="isFreePackage" />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12" v-if="form.enableVolumeSignal">
+            <el-form-item label="放缩量倍数" prop="volumeMultiplier">
+              <el-input-number
+                v-model="form.volumeMultiplier"
+                :min="1.01"
+                :step="0.01"
+                :precision="2"
+                style="width: 100%"
+              />
+            </el-form-item>
+          </el-col>
+          <el-col :span="12">
             <el-form-item label="突破回踩信号">
               <el-switch v-model="form.enablePatternSignal" :disabled="isFreePackage" />
             </el-form-item>
@@ -315,6 +335,8 @@ type StrategyDto = {
   enableRsiOversold?: boolean;
   enableRsiOverbought?: boolean;
   enableMovingAverages?: boolean;
+  enableVolumeSignal?: boolean;
+  volumeMultiplier?: number;
   enablePatternSignal?: boolean;
 };
 
@@ -448,6 +470,16 @@ const rules = {
       trigger: 'change',
     },
   ],
+  volumeMultiplier: [
+    {
+      validator: (_: any, value: any, cb: any) => {
+        if (!(form.value as any).enableVolumeSignal) return cb();
+        if (typeof value !== 'number' || value <= 1) return cb(new Error('放缩量倍数必须 > 1'));
+        cb();
+      },
+      trigger: 'change',
+    },
+  ],
 } as const;
 
 const form = ref({
@@ -466,6 +498,8 @@ const form = ref({
   enableRsiOversold: true,
   enableRsiOverbought: true,
   enableMovingAverages: false,
+  enableVolumeSignal: false,
+  volumeMultiplier: 1.5,
   enablePatternSignal: true,
 });
 
@@ -474,6 +508,7 @@ function enforceFreeIndicatorConstraints() {
   form.value.enableRsiOversold = false;
   form.value.enableRsiOverbought = false;
   form.value.enableMovingAverages = false;
+  form.value.enableVolumeSignal = false;
   form.value.enablePatternSignal = false;
 }
 
@@ -498,6 +533,8 @@ function openCreate(code = '') {
     enableRsiOversold: true,
     enableRsiOverbought: true,
     enableMovingAverages: false,
+    enableVolumeSignal: false,
+    volumeMultiplier: 1.5,
     enablePatternSignal: true,
   };
   enforceFreeIndicatorConstraints();
@@ -518,6 +555,8 @@ function openEdit(row: any) {
     if (!Array.isArray((form.value as any).subscriptionIds)) {
       (form.value as any).subscriptionIds = [];
     }
+    if (typeof (form.value as any).enableVolumeSignal !== 'boolean') (form.value as any).enableVolumeSignal = false;
+    if (typeof (form.value as any).volumeMultiplier !== 'number') (form.value as any).volumeMultiplier = 1.5;
     enforceFreeIndicatorConstraints();
     dialogVisible.value = true;
   });

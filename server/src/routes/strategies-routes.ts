@@ -53,6 +53,8 @@ const StrategyInputSchema = z.object({
   enableRsiOversold: z.boolean().default(true),
   enableRsiOverbought: z.boolean().default(true),
   enableMovingAverages: z.boolean().default(false),
+  enableVolumeSignal: z.boolean().default(false),
+  volumeMultiplier: z.number().min(1.01).default(1.5),
   enablePatternSignal: z.boolean().default(false),
 });
 
@@ -206,6 +208,7 @@ export function registerStrategyRoutes(app: Express): void {
         enableRsiOversold: parsed.enableRsiOversold,
         enableRsiOverbought: parsed.enableRsiOverbought,
         enableMovingAverages: parsed.enableMovingAverages,
+        enableVolumeSignal: parsed.enableVolumeSignal,
         enablePatternSignal: parsed.enablePatternSignal,
       };
 
@@ -241,9 +244,9 @@ export function registerStrategyRoutes(app: Express): void {
       await execute(
         `INSERT INTO strategies (
           id,user_id,name,enabled,symbols,market_time_only,subscription_ids_json,alert_mode,target_price_up,target_price_down,interval_ms,cooldown_minutes,price_alert_percent,
-          enable_macd_golden_cross,enable_rsi_oversold,enable_rsi_overbought,enable_moving_averages,enable_pattern_signal,
+          enable_macd_golden_cross,enable_rsi_oversold,enable_rsi_overbought,enable_moving_averages,enable_volume_signal,volume_multiplier,enable_pattern_signal,
           created_at,updated_at
-        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+        ) VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
         [
           id,
           targetUserId,
@@ -262,6 +265,8 @@ export function registerStrategyRoutes(app: Express): void {
           boolToInt(parsed.enableRsiOversold),
           boolToInt(parsed.enableRsiOverbought),
           boolToInt(parsed.enableMovingAverages),
+          boolToInt(parsed.enableVolumeSignal),
+          parsed.volumeMultiplier,
           boolToInt(parsed.enablePatternSignal),
           ts,
           ts,
@@ -324,7 +329,7 @@ export function registerStrategyRoutes(app: Express): void {
       await execute(
         `UPDATE strategies SET
           user_id=?,name=?,enabled=?,symbols=?,market_time_only=?,alert_mode=?,target_price_up=?,target_price_down=?,interval_ms=?,cooldown_minutes=?,price_alert_percent=?,
-          enable_macd_golden_cross=?,enable_rsi_oversold=?,enable_rsi_overbought=?,enable_moving_averages=?,enable_pattern_signal=?,
+          enable_macd_golden_cross=?,enable_rsi_oversold=?,enable_rsi_overbought=?,enable_moving_averages=?,enable_volume_signal=?,volume_multiplier=?,enable_pattern_signal=?,
           subscription_ids_json=?,updated_at=?
         WHERE id=?`,
         [
@@ -343,6 +348,8 @@ export function registerStrategyRoutes(app: Express): void {
           boolToInt(parsed.enableRsiOversold),
           boolToInt(parsed.enableRsiOverbought),
           boolToInt(parsed.enableMovingAverages),
+          boolToInt(parsed.enableVolumeSignal),
+          parsed.volumeMultiplier,
           boolToInt(parsed.enablePatternSignal),
           subscriptionIdsJson,
           ts,

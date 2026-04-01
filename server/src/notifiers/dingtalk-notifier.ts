@@ -82,6 +82,7 @@ function formatIndicatorBlock(indicator: any): string {
   const macd = indicator.macd;
   const rsi = indicator.rsi;
   const ma = indicator.movingAverages;
+  const vol = indicator.volume;
 
   const macdText = macd
     ? macd.trend === 'BULLISH'
@@ -99,7 +100,39 @@ function formatIndicatorBlock(indicator: any): string {
         : '⚖️ 正常'
     : '';
 
-  const maText = ma ? String(ma.trend || '') : '';
+  const maTrendText = ma
+    ? ma.trend === 'ABOVE_ALL'
+      ? '站上全部均线'
+      : ma.trend === 'BELOW_ALL'
+        ? '跌破全部均线'
+        : '均线纠缠'
+    : '';
+
+  const maSignalText = ma?.signals
+    ? Object.entries(ma.signals)
+        .map(([k, v]) => {
+          const label = k === 'ma5'
+            ? '5日'
+            : k === 'ma10'
+              ? '10日'
+              : k === 'ma20'
+                ? '20日'
+                : k === 'ma60'
+                  ? '60日'
+                  : k;
+          const action = v === 'BREAKOUT' ? '突破' : '跌破';
+          return `${action}${label}`;
+        })
+        .join('，')
+    : '';
+
+  const volText = vol
+    ? vol.status === 'SURGE'
+      ? `放量 x${safeNum(vol.ratio, 2)}`
+      : vol.status === 'SHRINK'
+        ? `缩量 x${safeNum(vol.ratio, 2)}`
+        : `正常 x${safeNum(vol.ratio, 2)}`
+    : '';
 
   const lines: string[] = [];
   lines.push('### 📊  核心指标');
@@ -107,11 +140,13 @@ function formatIndicatorBlock(indicator: any): string {
   lines.push('|------|-----------|------|');
   if (macd) lines.push(`| **MACD** | ${macdText} | 柱: ${safeNum(macd.histogram, 4)} |`);
   if (rsi) lines.push(`| **RSI(14)** | ${safeNum(rsi.value, 2)} (${rsiText}) | 强弱指标 |`);
-  if (ma) lines.push(`| **均线趋势** | ${maText} | 站上了所有均线 |`);
+  if (ma) lines.push(`| **均线** | ${maTrendText} | ${maSignalText || 'MA5/10/20/60'} |`);
+  if (vol) lines.push(`| **成交量** | ${volText} | 均值: ${safeNum(vol.averageVolume, 0)} |`);
 
   if (ma) {
     lines.push('');
     lines.push('### 均线系统');
+    if (typeof ma.previousClose === 'number') lines.push(`- 上一收盘: ${safeNum(ma.previousClose, 2)}`);
     lines.push(`- MA5: ${safeNum(ma.ma5, 2)}`);
     lines.push(`- MA10: ${safeNum(ma.ma10, 2)}`);
     lines.push(`- MA20: ${safeNum(ma.ma20, 2)}`);

@@ -76,12 +76,53 @@ function formatIndicatorBlock(indicator: any): string {
   const macd = indicator.macd;
   const rsi = indicator.rsi;
   const ma = indicator.movingAverages;
+  const vol = indicator.volume;
 
   const parts: string[] = [];
   parts.push('### 📊 技术指标');
   if (macd) parts.push(`- MACD: ${String(macd.trend || '')} (hist: ${safeNum(macd.histogram, 4)})`);
   if (rsi) parts.push(`- RSI(14): ${safeNum(rsi.value, 2)} (${String(rsi.status || '')})`);
-  if (ma) parts.push(`- MA趋势: ${String(ma.trend || '')} (MA20: ${safeNum(ma.ma20, 2)})`);
+  if (vol) {
+    const volText = vol.status === 'SURGE'
+      ? `放量 x${safeNum(vol.ratio, 2)}`
+      : vol.status === 'SHRINK'
+        ? `缩量 x${safeNum(vol.ratio, 2)}`
+        : `正常 x${safeNum(vol.ratio, 2)}`;
+    parts.push(`- 成交量: ${volText} (均值: ${safeNum(vol.averageVolume, 0)})`);
+  }
+  if (ma) {
+    const maTrendText = ma.trend === 'ABOVE_ALL'
+      ? '站上全部均线'
+      : ma.trend === 'BELOW_ALL'
+        ? '跌破全部均线'
+        : '均线纠缠';
+
+    const maSignalText = ma.signals
+      ? Object.entries(ma.signals)
+          .map(([k, v]) => {
+            const label = k === 'ma5'
+              ? '5日'
+              : k === 'ma10'
+                ? '10日'
+                : k === 'ma20'
+                  ? '20日'
+                  : k === 'ma60'
+                    ? '60日'
+                    : k;
+            const action = v === 'BREAKOUT' ? '突破' : '跌破';
+            return `${action}${label}`;
+          })
+          .join('，')
+      : '';
+
+    parts.push(`- 均线趋势: ${maTrendText}`);
+    if (maSignalText) parts.push(`- 均线信号: ${maSignalText}`);
+    if (typeof ma.previousClose === 'number') parts.push(`- 上一收盘: ${safeNum(ma.previousClose, 2)}`);
+    parts.push(`- MA5: ${safeNum(ma.ma5, 2)}`);
+    parts.push(`- MA10: ${safeNum(ma.ma10, 2)}`);
+    parts.push(`- MA20: ${safeNum(ma.ma20, 2)}`);
+    parts.push(`- MA60: ${safeNum(ma.ma60, 2)}`);
+  }
   return parts.join('\n');
 }
 

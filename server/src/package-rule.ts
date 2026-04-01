@@ -17,6 +17,7 @@ export type StrategyIndicatorInput = {
   enableRsiOversold?: boolean;
   enableRsiOverbought?: boolean;
   enableMovingAverages?: boolean;
+  enableVolumeSignal?: boolean;
   enablePatternSignal?: boolean;
 };
 
@@ -97,12 +98,13 @@ export async function validateCreateStrategyPermission(
       Boolean(indicators.enableRsiOversold) ||
       Boolean(indicators.enableRsiOverbought) ||
       Boolean(indicators.enableMovingAverages) ||
+      Boolean(indicators.enableVolumeSignal) ||
       Boolean(indicators.enablePatternSignal);
     if (blocked) {
       return {
         ok: false,
         status: 403,
-        message: '免费版不支持 RSI 超卖/RSI 超买/均线信号/形态信号，请升级套餐后使用。',
+        message: '免费版不支持 RSI 超卖/RSI 超买/均线信号/成交量信号/形态信号，请升级套餐后使用。',
         info,
       };
     }

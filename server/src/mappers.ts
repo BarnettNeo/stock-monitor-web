@@ -23,6 +23,14 @@ export function rowToStrategy(row: any): any {
     enableRsiOversold: intToBool(row.enable_rsi_oversold),
     enableRsiOverbought: intToBool(row.enable_rsi_overbought),
     enableMovingAverages: intToBool(row.enable_moving_averages),
+    enableVolumeSignal: row.enable_volume_signal === undefined || row.enable_volume_signal === null
+      ? false
+      : intToBool(row.enable_volume_signal),
+    volumeMultiplier: typeof row.volume_multiplier === 'number'
+      ? row.volume_multiplier
+      : row.volume_multiplier
+        ? Number(row.volume_multiplier)
+        : 1.5,
     enablePatternSignal: intToBool(row.enable_pattern_signal),
     createdAt: row.created_at,
     updatedAt: row.updated_at,

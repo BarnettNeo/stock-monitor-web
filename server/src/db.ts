@@ -222,6 +222,8 @@ async function migrateMySqlSchema(): Promise<void> {
       enable_rsi_oversold TINYINT NOT NULL,
       enable_rsi_overbought TINYINT NOT NULL,
       enable_moving_averages TINYINT NOT NULL,
+      enable_volume_signal TINYINT NOT NULL DEFAULT 0,
+      volume_multiplier DOUBLE NOT NULL DEFAULT 1.5,
       enable_pattern_signal TINYINT NOT NULL,
       subscription_ids_json TEXT,
       created_at VARCHAR(40) NOT NULL,
@@ -230,6 +232,9 @@ async function migrateMySqlSchema(): Promise<void> {
       INDEX idx_strategies_updated_at (updated_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
+
+  await ensureMySqlColumn('strategies', 'enable_volume_signal', 'enable_volume_signal TINYINT NOT NULL DEFAULT 0');
+  await ensureMySqlColumn('strategies', 'volume_multiplier', 'volume_multiplier DOUBLE NOT NULL DEFAULT 1.5');
 
   await executeOnPool(`
     CREATE TABLE IF NOT EXISTS subscriptions (
@@ -285,6 +290,12 @@ async function migrateMySqlSchema(): Promise<void> {
   );
   await executeOnPool(
     'UPDATE strategies SET market_time_only = 1 WHERE market_time_only IS NULL',
+  );
+  await executeOnPool(
+    'UPDATE strategies SET enable_volume_signal = 0 WHERE enable_volume_signal IS NULL',
+  );
+  await executeOnPool(
+    'UPDATE strategies SET volume_multiplier = 1.5 WHERE volume_multiplier IS NULL OR volume_multiplier <= 0',
   );
 }
 
