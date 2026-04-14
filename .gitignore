@@ -1,6 +1,12 @@
 node_modules/
 dist/
 
+# SSH keys / deploy temp keys (never commit)
+ssh/*.pem
+ssh/*.key
+ssh/*.pub
+.deploy-key-tmp/
+
 # 环境变量（避免提交本地密钥）
 .env
 .env.*
