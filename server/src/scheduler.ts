@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import axios from 'axios';
 
 import { execute, query } from './db';
 import { runStrategyOnce, type Strategy } from './engine';
@@ -13,8 +14,73 @@ export type SchedulerHandle = {
   stop: () => void;
 };
 
+type AttributionCitation = {
+  title: string;
+  source?: string;
+  url?: string;
+  publishedAt?: string;
+};
+
+type AttributionResult = {
+  summary: string;
+  followUps?: string[];
+  confidence?: number;
+  citations?: AttributionCitation[];
+  meta?: any;
+};
+
 function buildMarkdownFromEvent(ev: any): { title: string; markdown: string } {
   return buildNotifyPayload(ev, 'dingtalk');
+}
+
+function getAgentsBaseUrl(): string {
+  const raw = String(process.env.AGENTS_BASE_URL || 'http://127.0.0.1:8009').trim();
+  return raw.replace(/\/+$/, '');
+}
+
+async function analyzeAttribution(
+  userId: string | null | undefined,
+  ev: any,
+  windowMinutes: number = 10,
+): Promise<AttributionResult | null> {
+  try {
+    const baseUrl = getAgentsBaseUrl();
+    const payload = {
+      symbol: String(ev.symbol || ''),
+      stockName: ev.stockName || ev.snapshot?.stock?.name || '',
+      eventReason: String(ev.reason || ''),
+      snapshot: ev.snapshot || null,
+      windowMinutes,
+      // For future: pass userId for user-level memory retrieval
+      userId: userId || null,
+    };
+
+    const r = await axios.post(`${baseUrl}/analysis/attribution`, payload, { timeout: 45000 });
+    const data = r.data || {};
+    if (!data || data.ok === false) return null;
+
+    const summary = String(data.summary || '').trim();
+    if (!summary) return null;
+
+    return {
+      summary,
+      followUps: Array.isArray(data.followUps) ? data.followUps.map((s: any) => String(s)) : undefined,
+      confidence: typeof data.confidence === 'number' ? data.confidence : undefined,
+      citations: Array.isArray(data.citations)
+        ? data.citations
+            .map((c: any) => ({
+              title: String(c?.title || '').trim(),
+              source: c?.source ? String(c.source) : undefined,
+              url: c?.url ? String(c.url) : undefined,
+              publishedAt: c?.publishedAt ? String(c.publishedAt) : undefined,
+            }))
+            .filter((c: any) => c.title)
+        : undefined,
+      meta: data.meta || undefined,
+    };
+  } catch {
+    return null;
+  }
 }
 
 // 扫描一次：读取启用策略 -> 计算触发事件 -> 对订阅发送并落库 trigger_logs
@@ -68,12 +134,16 @@ export async function scanOnce(): Promise<void> {
     try {
       const events = await runStrategyOnce(strategy);
       for (const ev of events) {
+        // 归因分析：每个事件做一次，复用到该事件的所有订阅推送
+        const attribution = await analyzeAttribution(strategy.userId || null, ev, 10);
+        const evForPayload = attribution ? { ...ev, attribution } : ev;
+
         const subIds = (strategy as any).subscriptionIds as string[] | undefined;
         const targets = subIds && subIds.length > 0 ? subIds.map((id) => subMap.get(id)).filter(Boolean) : [undefined];
 
         for (const sub of targets) {
           // 每个订阅都单独落一条 trigger_log，便于回看不同渠道的发送结果。
-          const payload = sub ? buildNotifyPayload(ev, sub.type) : buildMarkdownFromEvent(ev);
+          const payload = sub ? buildNotifyPayload(evForPayload, sub.type) : buildMarkdownFromEvent(evForPayload);
           const sendResult = sub ? await notifyBySubscription(sub, payload) : { ok: true };
 
           const id = crypto.randomUUID();
@@ -95,6 +165,32 @@ export async function scanOnce(): Promise<void> {
               nowIso(),
             ],
           );
+
+          // 归因报告落库（不影响主流程）
+          if (attribution && attribution.summary) {
+            const reportId = crypto.randomUUID();
+            try {
+              await execute(
+                `INSERT INTO attribution_reports (
+                  id,user_id,trigger_log_id,symbol,stock_name,event_reason,analysis_summary,analysis_json,created_at
+                ) VALUES (?,?,?,?,?,?,?,?,?)`,
+                [
+                  reportId,
+                  strategy.userId || null,
+                  id,
+                  ev.symbol,
+                  ev.stockName || null,
+                  ev.reason,
+                  attribution.summary,
+                  JSON.stringify(attribution),
+                  nowIso(),
+                ],
+              );
+            } catch (e) {
+              // ignore (e.g. table not created yet / duplicate constraint)
+              void e;
+            }
+          }
         }
       }
     } catch (e) {

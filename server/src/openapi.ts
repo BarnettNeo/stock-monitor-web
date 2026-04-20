@@ -117,6 +117,24 @@ export const openapiDoc = {
         responses: { '200': { description: 'OK' } },
       },
     },
+    '/api/attribution-reports': {
+      get: {
+        summary: 'List attribution reports',
+        parameters: [
+          { name: 'triggerLogId', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'symbol', in: 'query', required: false, schema: { type: 'string' } },
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100 } },
+        ],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/attribution-reports/{id}': {
+      get: {
+        summary: 'Get attribution report detail',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
     '/api/dashboard/screen': {
       get: {
         summary: 'Big screen dashboard overview',

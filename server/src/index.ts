@@ -17,6 +17,7 @@ import { registerSubscriptionRoutes } from './routes/subscriptions-routes';
 import { registerTriggerLogRoutes } from './routes/trigger-logs-routes';
 import { registerAgentRoutes } from './routes/agent-routes';
 import { registerUserRoutes } from './routes/users-routes';
+import { registerAttributionReportRoutes } from './routes/attribution-reports-routes';
 
 /**
  * server 主入口：
@@ -50,6 +51,7 @@ registerPackageRoutes(app);
 registerStrategyRoutes(app);
 registerSubscriptionRoutes(app);
 registerTriggerLogRoutes(app);
+registerAttributionReportRoutes(app);
 registerAgentRoutes(app);
 
 

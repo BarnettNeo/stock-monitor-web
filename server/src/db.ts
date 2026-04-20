@@ -277,6 +277,25 @@ async function migrateMySqlSchema(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
+  // 异动归因报告：与 trigger_logs 一对一关联（每条推送/落库记录一份归因结果）
+  await executeOnPool(`
+    CREATE TABLE IF NOT EXISTS attribution_reports (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64),
+      trigger_log_id VARCHAR(64) NOT NULL,
+      symbol VARCHAR(32) NOT NULL,
+      stock_name VARCHAR(255),
+      event_reason TEXT,
+      analysis_summary TEXT,
+      analysis_json LONGTEXT,
+      created_at VARCHAR(40) NOT NULL,
+      UNIQUE KEY uk_attribution_trigger_log_id (trigger_log_id),
+      INDEX idx_attribution_user_id (user_id),
+      INDEX idx_attribution_symbol (symbol),
+      INDEX idx_attribution_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
   await executeOnPool(`
     CREATE TABLE IF NOT EXISTS _meta (
       meta_key VARCHAR(128) PRIMARY KEY,
