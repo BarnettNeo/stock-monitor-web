@@ -1,4 +1,4 @@
-# 📈 股票监控AI助手 (Stock Monitor Agents)
+# 📈 股票监控分析AI助手 (Stock Monitor Agents)
 由原轻量级股票监控与推送系统升级改造：
 - 原分支：main
 - 地址：https://github.com/BarnettNeo/stock-monitor-web/tree/main

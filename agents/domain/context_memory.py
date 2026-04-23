@@ -42,6 +42,7 @@ async def resolve_effective_message(
       - 不在 main.py 写死“继续/深入/详情”这种关键词，而是通过“检索”做上下文联动。
       - 优先使用用户最近对话（Redis 短期缓存），再用 Milvus 长期记忆兜底。
       - 返回 effective_message 会附带“检索推断来源”，方便调试和解释。
+      - Redis→embedding disambiguation→Milvus→state 
     """
     from domain.strategy import extract_symbols_from_text
 
