@@ -296,6 +296,27 @@ async function migrateMySqlSchema(): Promise<void> {
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
   `);
 
+  // 新闻入库任务运行记录（用于定时任务可观测性 + 增量窗口控制）
+  await executeOnPool(`
+    CREATE TABLE IF NOT EXISTS news_ingest_runs (
+      id VARCHAR(64) PRIMARY KEY,
+      trace_id VARCHAR(64) NOT NULL,
+      symbols TEXT,
+      since_minutes INT NOT NULL,
+      max_items INT NOT NULL,
+      ok TINYINT NOT NULL,
+      fetched INT NOT NULL DEFAULT 0,
+      processed INT NOT NULL DEFAULT 0,
+      inserted INT NOT NULL DEFAULT 0,
+      errors_json LONGTEXT,
+      meta_json LONGTEXT,
+      started_at VARCHAR(40) NOT NULL,
+      finished_at VARCHAR(40) NOT NULL,
+      INDEX idx_news_ingest_runs_trace_id (trace_id),
+      INDEX idx_news_ingest_runs_started_at (started_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
   await executeOnPool(`
     CREATE TABLE IF NOT EXISTS _meta (
       meta_key VARCHAR(128) PRIMARY KEY,

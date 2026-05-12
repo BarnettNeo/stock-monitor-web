@@ -4,7 +4,7 @@ from typing import Any, Dict, List, Optional
 
 import httpx
 
-from core.config import _llm_config, TOOLS_SPEC
+from core.config import _llm_config, _llm_config_for_provider, TOOLS_SPEC
 
 
 def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
@@ -43,9 +43,10 @@ async def call_openai_compatible(
     messages: List[Dict[str, Any]],
     model_override: Optional[str] = None,
     json_mode: bool = False,
+    provider_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     """调用OpenAI兼容的LLM接口 - 支持通义千问Qwen3-Max"""
-    cfg = _llm_config()
+    cfg = _llm_config_for_provider(provider_override)
     base_url = cfg["base_url"].rstrip("/")
     api_key = cfg["api_key"]
     model = model_override or cfg["model"]
@@ -55,6 +56,7 @@ async def call_openai_compatible(
 
     # 检测是否为通义千问DashScope API
     is_dashscope = "dashscope" in base_url.lower() or "aliyun" in base_url.lower()
+    is_compatible_endpoint = "compatible-mode" in base_url.lower()
     
     # 构建请求URL
     if is_dashscope:
@@ -113,12 +115,21 @@ async def call_openai_compatible(
     except httpx.TimeoutException as e:
         return {"ok": False, "error": f"LLM 请求超时: {str(e)}", "raw": {}}
     except httpx.HTTPStatusError as e:
+        # 获取详细错误信息
+        try:
+            error_detail = e.response.json()
+        except Exception:
+            error_detail = e.response.text or str(e)
+
         # DashScope 某些环境可能不支持 response_format，兜底重试一次（仅 json_mode）
         if json_mode and is_dashscope:
             try:
                 payload2 = dict(payload)
                 payload2.pop("response_format", None)
-                payload2["result_format"] = "message"
+                # 只有在非 compatible-mode 终端时才添加 result_format，否则会导致 400 错误
+                if not is_compatible_endpoint:
+                    payload2["result_format"] = "message"
+                
                 payload2["tools"] = [
                     {
                         "type": "function",
@@ -142,13 +153,10 @@ async def call_openai_compatible(
                     r2.raise_for_status()
                     data = r2.json()
             except Exception as e2:
-                return {"ok": False, "error": f"LLM 请求异常: {str(e2)}", "raw": {}}
+                # 如果重试也失败，返回更有参考价值的原始错误信息
+                return {"ok": False, "error": f"LLM 请求异常 (重试也失败): {error_detail}", "raw": {}}
         else:
-            try:
-                detail = e.response.text
-            except Exception:
-                detail = str(e)
-            return {"ok": False, "error": f"LLM 请求异常: {detail}", "raw": {}}
+            return {"ok": False, "error": f"LLM 请求异常: {error_detail}", "raw": {}}
     except Exception as e:
         return {"ok": False, "error": f"LLM 请求异常: {str(e)}", "raw": {}}
 

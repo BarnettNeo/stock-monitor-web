@@ -47,6 +47,8 @@ async def attribution_rag(
     event_reason: str,
     snapshot: Optional[Dict[str, Any]],
     window_minutes: int = 10,
+    model_override: Optional[str] = None,
+    provider_override: Optional[str] = None,
 ) -> Dict[str, Any]:
     sym = (symbol or "").strip()
     name = (stock_name or "").strip()
@@ -98,7 +100,12 @@ async def attribution_rag(
     )
 
     messages = [{"role": "system", "content": "你是专业、谨慎的财经分析师。"}, {"role": "user", "content": prompt}]
-    llm = await call_openai_compatible(messages, json_mode=True)
+    llm = await call_openai_compatible(
+        messages,
+        json_mode=True,
+        model_override=model_override,
+        provider_override=provider_override,
+    )
     if not llm.get("ok"):
         # Fallback: return a deterministic response even without LLM, for pipeline stability.
         return {

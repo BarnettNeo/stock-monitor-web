@@ -11,7 +11,9 @@ from core.config import (
     _history_limit,
     _llm_config,
     _port,
+    _guess_provider_for_model,
     _sanitize_model,
+    _sanitize_provider,
 )
 from core.models import AgentChatRequest, AgentChatResponse, AttributionRequest, AttributionResponse
 from domain.attribution import attribution_rag
@@ -67,6 +69,15 @@ async def lifespan(app: FastAPI):
 app = FastAPI(title=APP_NAME, lifespan=lifespan)
 
 print(f"开始, port={_port()}")
+
+# A2A multi-agent routes (ingest/retrieval/thinking)
+try:
+    from a2a.api import router as a2a_router
+
+    app.include_router(a2a_router)
+except Exception as _e:
+    # Keep legacy endpoints available even if optional deps (feedparser/bs4) are missing.
+    print(f"[WARN] A2A router not loaded: {_e}")
 
 
 @app.get("/health")
@@ -145,7 +156,9 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
     user_id = str((payload.user or {}).get("userId") or "")
     tool_results = payload.toolResults or []
 
-    req_model = _sanitize_model((payload.context or {}).get("model") if isinstance(payload.context, dict) else None)
+    ctx = payload.context if isinstance(payload.context, dict) else {}
+    req_model = _sanitize_model(ctx.get("model"))
+    req_provider = _sanitize_provider(ctx.get("provider")) or _guess_provider_for_model(req_model)
 
     history = await memory.load(user_id)
 
@@ -170,7 +183,7 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
         )
         messages.append({"role": "user", "content": "请基于工具结果，给出最终答复。"})
 
-        llm = await call_openai_compatible(messages, model_override=req_model)
+        llm = await call_openai_compatible(messages, model_override=req_model, provider_override=req_provider)
         if not llm.get("ok"):
             return AgentChatResponse(reply=format_tool_results(tool_results), toolCalls=[], meta={"mode": "no-llm"})
 
@@ -295,7 +308,13 @@ async def agent_chat(payload: AgentChatRequest) -> AgentChatResponse:
         }
     )
 
-    llm = await call_openai_compatible(decision_messages, model_override=req_model, json_mode=True)
+    llm = await call_openai_compatible(
+        decision_messages,
+        model_override=req_model,
+        json_mode=True,
+        provider_override=req_provider,
+    )
+    print(f"LLM response: {req_model}")
     if not llm.get("ok"):
         return AgentChatResponse(reply=f"(agents) LLM 调用失败：{llm.get('error')}", toolCalls=[], meta={"mode": "llm_error"})
 

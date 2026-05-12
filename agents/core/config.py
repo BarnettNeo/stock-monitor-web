@@ -50,6 +50,46 @@ def _llm_config() -> Dict[str, str]:
     }
 
 
+def _provider_key(provider: Optional[str]) -> str:
+    s = str(provider or "").strip().lower()
+    if not s:
+        return ""
+    s = re.sub(r"[^a-z0-9]+", "_", s).strip("_")
+    return s.upper()
+
+
+def _llm_config_for_provider(provider: Optional[str]) -> Dict[str, str]:
+    """
+    Provider-aware LLM config routing.
+
+    Env convention:
+      - LLM_BASE_URL_<PROVIDER>
+      - LLM_API_KEY_<PROVIDER>
+      - LLM_MODEL_<PROVIDER>
+
+    Fallbacks to the default LLM_* vars when provider-specific vars are not set.
+    """
+    key = _provider_key(provider)
+    if not key:
+        return _llm_config()
+
+    base_url = _env(f"LLM_BASE_URL_{key}", "") or _env("LLM_BASE_URL", "")
+    api_key = _env(f"LLM_API_KEY_{key}", "") or _env("LLM_API_KEY", "")
+    model = _env(f"LLM_MODEL_{key}", "") or _env("LLM_MODEL", "")
+
+    if not model:
+        if "dashscope" in base_url.lower() or "aliyun" in base_url.lower():
+            model = "qwen3-max"
+        else:
+            model = "qwen-plus"
+
+    return {
+        "base_url": base_url,
+        "api_key": api_key,
+        "model": model,
+    }
+
+
 def _sanitize_model(value: any) -> Optional[str]:
     """清理模型名称"""
     if not isinstance(value, str):
@@ -61,6 +101,37 @@ def _sanitize_model(value: any) -> Optional[str]:
     if not re.match(r"^[A-Za-z0-9_.:-]+$", s):
         return None
     return s
+
+
+def _sanitize_provider(value: any) -> Optional[str]:
+    """清理 provider 名称（用于多 provider 路由）"""
+    if not isinstance(value, str):
+        return None
+    s = value.strip().lower()
+    if not s or len(s) > 40:
+        return None
+    if not re.match(r"^[a-z0-9_-]+$", s):
+        return None
+    return s
+
+
+def _guess_provider_for_model(model: Optional[str]) -> Optional[str]:
+    """
+    Best-effort provider inference from model name.
+
+    This is used for legacy `/agent/chat` callers that only pass `context.model`
+    without an explicit provider.
+    """
+    m = str(model or "").strip().lower()
+    if not m:
+        return None
+    if m.startswith(("qwen",)):
+        return "dashscope"
+    if m.startswith(("glm", "chatglm", "bigmodel")):
+        return "zhipuai"
+    if m.startswith(("deepseek",)):
+        return "deepseek"
+    return None
 
 
 def _port() -> int:

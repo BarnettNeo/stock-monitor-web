@@ -1,0 +1,18 @@
+agents:
+  ingest_worker:
+    model: "qwen-turbo"  # 阿里云通义千问
+    provider: "dashscope"
+    reason: "文本清洗与结构化抽取，不需要强推理能力"
+    cost: "¥0.003/1K tokens"
+    
+  retrieval_worker:
+    model: "GLM-4-Flash-250414"  # 智谱 AI
+    provider: "zhipuai"
+    reason: "检索改写+归因需要一定理解能力，Flash版性价比高"
+    cost: "¥0.001/1K tokens"
+    
+  thinking_worker:
+    model: "deepseek-chat"  # DeepSeek V3
+    provider: "deepseek"
+    reason: "最终答复需要强推理+长文本总结，DeepSeek V3 性价比王者"
+    cost: "¥0.001/1K tokens (缓存后更低)"
