@@ -80,9 +80,9 @@ const draft = ref('');
 const sending = ref(false);
 const messages = ref<Msg[]>([]);
 
-// const modelOptions = ref<string[]>(['qwen3.5-flash', 'qwen3-max', 'qwen-turbo', 'qwen-max']);
-const modelOptions = ref<string[]>(['qwen3.5-flash']);
-const model = ref<string>('qwen3.5-flash');
+// const modelOptions = ref<string[]>(['qwen3.5-plus', 'qwen3-max', 'qwen-turbo', 'qwen-max']);
+const modelOptions = ref<string[]>(['qwen3.5-plus', 'qwen3.5-35b-a3b', 'qwen3.5-plus-2026-02-15']);
+const model = ref<string>('qwen3.5-plus');
 
 const listEl = ref<HTMLElement | null>(null);
 

@@ -354,7 +354,9 @@ export async function startScheduler(): Promise<SchedulerHandle> {
   const ingestIntervalMs = Number(process.env.NEWS_INGEST_INTERVAL_MS || 0);
   let ingestTimer: any = null;
   let ingestRunning = false;
-  if (ingestIntervalMs > 0) {
+  // 测试阶段，只在本地开启新闻采集
+  const isLocal = process.env.NODE_ENV === 'development';
+  if (ingestIntervalMs > 0 && isLocal) {
     const run = async () => {
       if (ingestRunning) return;
       ingestRunning = true;
