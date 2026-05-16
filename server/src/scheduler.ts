@@ -356,6 +356,7 @@ export async function startScheduler(): Promise<SchedulerHandle> {
   let ingestRunning = false;
   // 测试阶段，只在本地开启新闻采集
   const isLocal = process.env.NODE_ENV === 'development';
+  console.log('isLocal:', isLocal);
   if (ingestIntervalMs > 0 && isLocal) {
     const run = async () => {
       if (ingestRunning) return;

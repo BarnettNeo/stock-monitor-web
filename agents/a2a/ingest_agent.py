@@ -197,12 +197,64 @@ class NewsIngestAgent:
     def _parse_feeds(self, feeds: List[str], since_ts: int, max_items: int) -> Tuple[List[FeedItem], List[str]]:
         errors: List[str] = []
         items: List[FeedItem] = []
-        try:
-            import feedparser  # type: ignore
-        except Exception as e:
-            return [], [f"feedparser not installed: {str(e)}"]
 
+        # 中文注释
+        # 解析 RSS/Atom 订阅源
+        # 从 RSS/Atom 订阅源中提取新闻标题、URL、摘要、发布时间等信息
         for feed_url in feeds:
+            # Detect Sina-style JSON API (e.g. feed.mix.sina.com.cn/api/roll/get)
+            if "feed.mix.sina.com.cn/api/roll/get" in feed_url:
+                try:
+                    import urllib.request
+
+                    resp = urllib.request.urlopen(feed_url, timeout=int(_env("NEWS_HTTP_TIMEOUT", "15")))
+                    data = json.loads(resp.read().decode("utf-8"))
+                    result = data.get("result", {})
+                    feed_items = result.get("data", []) or []
+                    src = "新浪财经"
+
+                    for ent in feed_items[: max(1, max_items)]:
+                        title = str(ent.get("title", "") or "").strip()
+                        url = str(ent.get("url", "") or "").strip()
+                        intro = str(ent.get("intro", "") or "").strip()
+                        if not title:
+                            continue
+
+                        published_ts = 0
+                        try:
+                            published_ts = int(ent.get("ctime", 0) or 0)
+                        except Exception:
+                            published_ts = 0
+
+                        if published_ts and published_ts < since_ts:
+                            continue
+
+                        from datetime import datetime
+
+                        published_at = datetime.fromtimestamp(published_ts).isoformat() if published_ts else ""
+                        media_name = str(ent.get("media_name", "") or "").strip() or src
+
+                        items.append(
+                            FeedItem(
+                                title=title[:1024],
+                                url=url,
+                                source=media_name[:80],
+                                published_at=published_at[:64],
+                                published_ts=published_ts or int(time.time()),
+                                summary=intro[:4000],
+                            )
+                        )
+                except Exception as e:
+                    errors.append(f"sina json feed parse failed: {feed_url}: {str(e)}")
+                continue
+
+            # Default: RSS/Atom via feedparser
+            try:
+                import feedparser  # type: ignore
+            except Exception as e:
+                errors.append(f"feedparser not installed: {str(e)}")
+                continue
+
             try:
                 d = feedparser.parse(feed_url)
                 src = str(getattr(d, "feed", {}).get("title", "") or "")[:80] or feed_url
@@ -225,7 +277,6 @@ class NewsIngestAgent:
 
                     published_at = str(getattr(ent, "published", "") or getattr(ent, "updated", "") or "").strip()
                     summary = str(getattr(ent, "summary", "") or getattr(ent, "description", "") or "").strip()
-                    # basic cleanup for feed summaries (often HTML)
                     if summary and "<" in summary and ">" in summary:
                         try:
                             from bs4 import BeautifulSoup  # type: ignore
@@ -299,6 +350,7 @@ class NewsIngestAgent:
                 return f"sz{code}"
         return ""
 
+    # 主函数
     async def run(
         self,
         symbols: List[str],
@@ -437,6 +489,7 @@ class NewsIngestAgent:
                         "processed": processed,
                         "inserted": inserted,
                         "errors": len(errors),
+                        "error_details": errors[:5],
                     },
                     ensure_ascii=False,
                 )
