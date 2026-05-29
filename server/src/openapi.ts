@@ -211,6 +211,74 @@ export const openapiDoc = {
         },
         responses: { '200': { description: 'OK' } },
       },
-    }
+    },
+    '/api/voice/recordings': {
+      get: {
+        summary: 'List current user voice recordings',
+        parameters: [
+          { name: 'limit', in: 'query', required: false, schema: { type: 'integer', minimum: 1, maximum: 100 } },
+          { name: 'page', in: 'query', required: false, schema: { type: 'integer', minimum: 1 } },
+          { name: 'q', in: 'query', required: false, schema: { type: 'string' } },
+        ],
+        responses: { '200': { description: 'OK' } },
+      },
+      post: {
+        summary: 'Upload a voice recording blob',
+        parameters: [
+          { name: 'X-Voice-Duration-Ms', in: 'header', required: false, schema: { type: 'integer', minimum: 0 } },
+          { name: 'X-Voice-File-Name', in: 'header', required: false, schema: { type: 'string' } },
+          { name: 'X-Voice-Source', in: 'header', required: false, schema: { type: 'string' } },
+          { name: 'X-Voice-Transcript', in: 'header', required: false, schema: { type: 'string' }, description: '语音识别文本' },
+          { name: 'X-Voice-Llm-Reply', in: 'header', required: false, schema: { type: 'string' }, description: 'LLM 回复内容' },
+        ],
+        requestBody: {
+          required: true,
+          content: {
+            'audio/webm': { schema: { type: 'string', format: 'binary' } },
+            'audio/ogg': { schema: { type: 'string', format: 'binary' } },
+            'audio/mp4': { schema: { type: 'string', format: 'binary' } },
+            'application/octet-stream': { schema: { type: 'string', format: 'binary' } },
+          },
+        },
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/voice/recordings/{id}': {
+      get: {
+        summary: 'Get voice recording metadata',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' } },
+      },
+      delete: {
+        summary: 'Delete a voice recording',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/voice/recordings/{id}/file': {
+      get: {
+        summary: 'Download or stream the voice recording file',
+        parameters: [{ name: 'id', in: 'path', required: true, schema: { type: 'string' } }],
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/voice/asr/providers': {
+      get: {
+        summary: 'List available ASR providers',
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/voice/asr/aliyun/config': {
+      get: {
+        summary: 'Get Aliyun ASR runtime config',
+        responses: { '200': { description: 'OK' } },
+      },
+    },
+    '/api/voice/asr/aliyun/token': {
+      get: {
+        summary: 'Get Aliyun ASR token',
+        responses: { '200': { description: 'OK' } },
+      },
+    },
   },
 } as const;

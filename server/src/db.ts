@@ -318,6 +318,32 @@ async function migrateMySqlSchema(): Promise<void> {
   `);
 
   await executeOnPool(`
+    CREATE TABLE IF NOT EXISTS voice_recordings (
+      id VARCHAR(64) PRIMARY KEY,
+      user_id VARCHAR(64) NOT NULL,
+      original_name VARCHAR(255),
+      mime_type VARCHAR(128) NOT NULL,
+      file_ext VARCHAR(16) NOT NULL,
+      size_bytes BIGINT NOT NULL,
+      duration_ms INT,
+      sha256 VARCHAR(64) NOT NULL,
+      storage_path TEXT NOT NULL,
+      status VARCHAR(32) NOT NULL DEFAULT 'stored',
+      source VARCHAR(64),
+      transcript LONGTEXT,
+      llm_reply LONGTEXT,
+      created_at VARCHAR(40) NOT NULL,
+      updated_at VARCHAR(40) NOT NULL,
+      INDEX idx_voice_recordings_user_id (user_id),
+      INDEX idx_voice_recordings_status (status),
+      INDEX idx_voice_recordings_created_at (created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+  `);
+
+  await ensureMySqlColumn('voice_recordings', 'transcript', 'transcript LONGTEXT');
+  await ensureMySqlColumn('voice_recordings', 'llm_reply', 'llm_reply LONGTEXT');
+
+  await executeOnPool(`
     CREATE TABLE IF NOT EXISTS _meta (
       meta_key VARCHAR(128) PRIMARY KEY,
       meta_value TEXT,

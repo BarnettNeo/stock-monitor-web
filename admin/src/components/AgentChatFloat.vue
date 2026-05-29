@@ -15,6 +15,47 @@
             <span>AI 助手</span>
           </div>
           <div class="agent-float-actions">
+            <!-- 语音配置按钮 + 浮窗 -->
+            <el-popover
+              placement="bottom-end"
+              :width="240"
+              trigger="click"
+              popper-class="agent-float-voice-popover"
+            >
+              <template #reference>
+                <el-button size="small" class="agent-float-voice-btn">
+                  <el-icon><Setting /></el-icon>
+                  <span>语音配置</span>
+                </el-button>
+              </template>
+              <div class="voice-config-content">
+                <div class="voice-config-item">
+                  <label class="voice-config-label">ASR 服务</label>
+                  <el-select
+                    v-model="asrProvider"
+                    size="small"
+                    class="voice-config-select"
+                    placeholder="ASR 服务"
+                    @change="onAsrProviderChange"
+                  >
+                    <el-option label="浏览器内置" value="browser" />
+                    <el-option label="阿里云 NLS" value="aliyun" :disabled="!aliyunAsrEnabled" />
+                  </el-select>
+                </div>
+                <div class="voice-config-item">
+                  <label class="voice-config-label">ASR 语言</label>
+                  <el-select
+                    v-model="asrLanguage"
+                    size="small"
+                    class="voice-config-select"
+                    placeholder="语言"
+                  >
+                    <el-option label="中文" value="zh-CN" />
+                    <el-option label="英文" value="en-US" />
+                  </el-select>
+                </div>
+              </div>
+            </el-popover>
             <el-select
               v-model="model"
               size="small"
@@ -119,9 +160,10 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { ChatDotRound, ChatLineRound, Loading } from '@element-plus/icons-vue';
+import { ChatDotRound, ChatLineRound, Loading, Setting } from '@element-plus/icons-vue';
 import { api } from '../api';
 import { useASR } from '../composables/useASR';
+import { useAliyunASR } from '../composables/useAliyunASR';
 import { useVAD } from '../composables/useVAD';
 import VoiceMicButton from './VoiceMicButton.vue';
 import VoiceWaveformAnimation from './VoiceWaveformAnimation.vue';
@@ -144,6 +186,11 @@ const model = ref<string>('qwen3.5-plus');
 
 const listEl = ref<HTMLElement | null>(null);
 
+// ── ASR 配置 ──────────────────────────────────────────────
+const asrProvider = ref<'browser' | 'aliyun'>('browser');
+const asrLanguage = ref('zh-CN');
+const aliyunAsrEnabled = ref(false);
+
 // ── 语音状态 ──────────────────────────────────────────────
 const voiceState = ref<VoiceState>('idle');
 const volume = ref(0);
@@ -152,6 +199,8 @@ const recognizedText = ref('');
 const showPermissionModal = ref(false);
 // 保存最终识别的文本，用于取消/重录
 const transcriptBuffer = ref('');
+// 记录当前输入是否来自语音，用于 LLM 回复后自动保存录音记录
+const lastVoiceInput = ref(false);
 
 const isListening = computed(() => voiceState.value === 'listening' || voiceState.value === 'recording');
 const inputPlaceholder = computed(() => {
@@ -160,39 +209,50 @@ const inputPlaceholder = computed(() => {
 });
 
 // ── ASR 语音识别 ──────────────────────────────────────────
-const asr = useASR({
-  language: 'zh-CN',
-  onResult: (result) => {
-    if (result.isFinal) {
-      transcriptBuffer.value += result.transcript;
-      recognizedText.value = transcriptBuffer.value;
-      interimText.value = '';
-      // 同时填入输入框方便编辑
-      draft.value = transcriptBuffer.value;
-    } else {
-      interimText.value = result.transcript;
-    }
-  },
-  onError: (err) => {
-    if (err.includes('权限') || err.includes('not-allowed') || err.includes('denied')) {
-      showPermissionModal.value = true;
-    } else {
-      ElMessage.warning(err);
-    }
-    voiceState.value = 'idle';
-  },
-  onStart: () => {
-    voiceState.value = 'listening';
-    transcriptBuffer.value = '';
-    recognizedText.value = '';
-    interimText.value = '';
-  },
-  onEnd: () => {
-    if (voiceState.value === 'listening') {
+// 每次启动时重新创建 ASR 实例以应用最新配置
+function createASR() {
+  const callbacks = {
+    onResult: (result: { transcript: string; isFinal: boolean }) => {
+      console.log('语音识别', result);
+      if (result.isFinal) {
+        transcriptBuffer.value += result.transcript;
+        // recognizedText.value = transcriptBuffer.value;
+        interimText.value = '';
+        // 同时填入输入框方便编辑
+        draft.value = transcriptBuffer.value;
+      } else {
+        interimText.value = result.transcript;
+      }
+    },
+    onError: (err: string) => {
+      if (err.includes('权限') || err.includes('not-allowed') || err.includes('denied')) {
+        showPermissionModal.value = true;
+      } else {
+        ElMessage.warning(err);
+      }
       voiceState.value = 'idle';
-    }
-  },
-});
+    },
+    onStart: () => {
+      voiceState.value = 'listening';
+      transcriptBuffer.value = '';
+      recognizedText.value = '';
+      interimText.value = '';
+    },
+    onEnd: () => {
+      if (voiceState.value === 'listening') {
+        voiceState.value = 'idle';
+      }
+    },
+  };
+
+  if (asrProvider.value === 'aliyun') {
+    return useAliyunASR(callbacks);
+  }
+
+  return useASR({ ...callbacks, language: asrLanguage.value });
+}
+
+let asr = createASR();
 
 // ── VAD 声音活动检测 ──────────────────────────────────────
 const vad = useVAD(
@@ -276,6 +336,107 @@ function fillInputWithText(text: string): void {
   if (!text.trim()) return;
   voiceState.value = 'idle';
   draft.value = text.trim();
+  lastVoiceInput.value = true;
+}
+
+// ── ASR 提供商加载 ────────────────────────────────────
+async function onAsrProviderChange(): Promise<void> {
+  if (asrProvider.value === 'aliyun') {
+    try {
+      const res = await api.get('/voice/asr/aliyun/config');
+      if (res.data?.config) {
+        aliyunAsrEnabled.value = true;
+        ElMessage.success('阿里云 ASR 已就绪');
+      }
+    } catch {
+      aliyunAsrEnabled.value = false;
+      ElMessage.warning('阿里云 ASR 未配置（需设置 ALIYUN_NLS_ACCESS_KEY_ID/KEY_SECRET/APPKEY），已切回浏览器 ASR');
+      asrProvider.value = 'browser';
+    }
+  }
+  // 重新创建 ASR 实例以应用新配置
+  asr.abort();
+  asr = createASR();
+}
+
+async function loadVoiceProviders(): Promise<void> {
+  try {
+    const res = await api.get('/voice/asr/providers');
+    const data = res.data || {};
+    const providers = Array.isArray(data.providers) ? data.providers : [];
+    const aliyunItem = providers.find((p: any) => p.id === 'aliyun');
+    aliyunAsrEnabled.value = Boolean(aliyunItem?.enabled);
+    if (data.defaultProvider === 'aliyun' && aliyunAsrEnabled.value) {
+      asrProvider.value = 'aliyun';
+    }
+  } catch {
+    // 语音服务未配置，默认使用浏览器 ASR
+  }
+}
+
+// ── 录音上传与保存 ────────────────────────────────────
+let mediaRecorderForSave: MediaRecorder | null = null;
+let recordingChunksForSave: BlobPart[] = [];
+let recordingStreamForSave: MediaStream | null = null;
+
+async function startVoiceRecordingForSave(): Promise<void> {
+  try {
+    const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+    recordingStreamForSave = stream;
+    recordingChunksForSave = [];
+    const mimeType = 'audio/webm;codecs=opus';
+    mediaRecorderForSave = new MediaRecorder(stream, { mimeType: MediaRecorder.isTypeSupported(mimeType) ? mimeType : 'audio/webm' });
+    mediaRecorderForSave.ondataavailable = (event: BlobEvent) => {
+      if (event.data && event.data.size > 0) {
+        recordingChunksForSave.push(event.data);
+      }
+    };
+    mediaRecorderForSave.start();
+  } catch {
+    // 静默失败，录音保存为非核心功能
+  }
+}
+
+async function stopRecordingAndSaveToServer(userText: string, llmReply: string): Promise<void> {
+  if (!mediaRecorderForSave || mediaRecorderForSave.state === 'inactive') {
+    mediaRecorderForSave = null;
+    recordingStreamForSave = null;
+    return;
+  }
+
+  return new Promise<void>((resolve) => {
+    const recorder = mediaRecorderForSave!;
+    const stream = recordingStreamForSave;
+
+    recorder.onstop = async () => {
+      const blob = new Blob(recordingChunksForSave, { type: 'audio/webm' });
+      recordingChunksForSave = [];
+      recordingStreamForSave = null;
+      mediaRecorderForSave = null;
+      stream?.getTracks().forEach((t) => t.stop());
+
+      try {
+        const fileName = `voice-${Date.now()}-${crypto.randomUUID?.()?.slice(0,8) || Math.random().toString(36).slice(2,10)}.webm`;
+        await api.post('/voice/recordings', blob, {
+          headers: {
+            'Content-Type': 'audio/webm',
+            'X-Voice-Duration-Ms': String(0),
+            'X-Voice-File-Name': encodeURIComponent(fileName),
+            'X-Voice-Source': 'agent-chat',
+            'X-Voice-Transcript': encodeURIComponent(userText),
+            'X-Voice-Llm-Reply': encodeURIComponent(llmReply),
+          },
+          maxBodyLength: Infinity,
+          maxContentLength: Infinity,
+        });
+      } catch {
+        // 静默失败
+      }
+      resolve();
+    };
+
+    recorder.stop();
+  });
 }
 
 /** 取消录音（丢弃结果） */
@@ -422,6 +583,14 @@ async function send(): Promise<void> {
   messages.value.push({ role: 'user', content: text, ts: Date.now() });
   scrollToBottom();
   sending.value = true;
+
+  // 如果来自语音输入，开始录制音频用于后续保存
+  const isVoiceInput = lastVoiceInput.value;
+  lastVoiceInput.value = false;
+  if (isVoiceInput && mediaRecorderForSave === null) {
+    await startVoiceRecordingForSave().catch(() => {});
+  }
+
   try {
     const res = await api.post('/agent/chat', {
       message: text,
@@ -432,6 +601,11 @@ async function send(): Promise<void> {
 
     const reply = String(res.data?.reply || '').trim();
     messages.value.push({ role: 'assistant', content: reply || '(empty reply)', ts: Date.now() });
+
+    // 语音输入 + LLM 回复成功后自动保存录音记录至历史
+    if (isVoiceInput && reply) {
+      void stopRecordingAndSaveToServer(text, reply);
+    }
   } catch (e: any) {
     const data = e?.response?.data;
     const status = Number(e?.response?.status || 0);
@@ -469,6 +643,7 @@ async function send(): Promise<void> {
 
 onMounted(() => {
   loadModelFromStorage();
+  loadVoiceProviders();
   document.addEventListener('keydown', globalKeyDown);
   document.addEventListener('keyup', globalKeyUp);
 });
@@ -478,6 +653,11 @@ onBeforeUnmount(() => {
   document.removeEventListener('keyup', globalKeyUp);
   asr.abort();
   vad.stop();
+  // 清理录音资源
+  mediaRecorderForSave?.stream?.getTracks().forEach((t) => t.stop());
+  recordingStreamForSave?.getTracks().forEach((t) => t.stop());
+  mediaRecorderForSave = null;
+  recordingStreamForSave = null;
 });
 
 watch(
@@ -570,6 +750,35 @@ watch(
 
 .agent-float-model {
   width: 150px;
+}
+
+/* ── 语音配置按钮 ─────────────────────────────────── */
+.agent-float-voice-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.voice-config-content {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.voice-config-item {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.voice-config-label {
+  font-size: 12px;
+  color: var(--el-text-color-secondary);
+  font-weight: 500;
+}
+
+.voice-config-select {
+  width: 100%;
 }
 
 .agent-float-body {
@@ -736,6 +945,11 @@ watch(
 
   .agent-float-model {
     width: 120px;
+  }
+
+  .agent-float-voice-btn {
+    width: 100%;
+    justify-content: center;
   }
 }
 </style>

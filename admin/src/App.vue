@@ -45,6 +45,11 @@
               <span>触发记录</span>
             </el-menu-item>
 
+            <el-menu-item index="/voice-recordings">
+              <el-icon><Document /></el-icon>
+              <span>录音历史</span>
+            </el-menu-item>
+
           </el-sub-menu>
 
           <el-menu-item index="/profile/package">
@@ -88,6 +93,10 @@
           <el-menu-item index="/trigger-logs" @click="mobileMenuOpen = false">
             <el-icon><Files /></el-icon>
             <span>触发记录</span>
+          </el-menu-item>
+          <el-menu-item index="/voice-recordings" @click="mobileMenuOpen = false">
+            <el-icon><Document /></el-icon>
+            <span>录音历史</span>
           </el-menu-item>
           <el-menu-item index="/profile/package" @click="mobileMenuOpen = false">
             <el-icon><User /></el-icon>
@@ -213,6 +222,7 @@ const pageTitle = computed(() => {
   if (route.path.startsWith('/users')) return '用户管理';
   if (route.path.startsWith('/profile/package')) return '个人中心';
   if (route.path.startsWith('/trigger-logs')) return '触发记录';
+  if (route.path.startsWith('/voice-recordings')) return '录音历史';
   return 'Stock Monitor';
 });
 </script>

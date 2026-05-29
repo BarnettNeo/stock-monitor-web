@@ -11,6 +11,7 @@ import TriggerLogDetailPage from './views/TriggerLogDetailPage.vue';
 import ScreenHomePage from './views/ScreenHomePage.vue';
 import ProfilePackagePage from './views/ProfilePackagePage.vue';
 import UserManagementPage from './views/UserManagementPage.vue';
+import VoiceRecordingsPage from './views/VoiceRecordingsPage.vue';
 
 export const router = createRouter({
   history: createWebHistory(),
@@ -22,6 +23,7 @@ export const router = createRouter({
     { path: '/strategies', component: StrategiesPage },
     { path: '/subscriptions', component: SubscriptionsPage },
     { path: '/profile/package', component: ProfilePackagePage },
+    { path: '/voice-recordings', component: VoiceRecordingsPage },
     { path: '/users', component: UserManagementPage, meta: { admin: true } },
     { path: '/trigger-logs', component: TriggerLogsPage },
     { path: '/trigger-logs/:id', component: TriggerLogDetailPage },

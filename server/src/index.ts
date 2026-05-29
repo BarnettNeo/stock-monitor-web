@@ -18,6 +18,7 @@ import { registerTriggerLogRoutes } from './routes/trigger-logs-routes';
 import { registerAgentRoutes } from './routes/agent-routes';
 import { registerUserRoutes } from './routes/users-routes';
 import { registerAttributionReportRoutes } from './routes/attribution-reports-routes';
+import { registerVoiceRoutes } from './routes/voice-routes';
 
 /**
  * server 主入口：
@@ -53,6 +54,7 @@ registerSubscriptionRoutes(app);
 registerTriggerLogRoutes(app);
 registerAttributionReportRoutes(app);
 registerAgentRoutes(app);
+registerVoiceRoutes(app);
 
 
 app.listen(PORT, () => {
