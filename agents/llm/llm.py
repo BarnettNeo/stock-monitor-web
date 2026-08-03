@@ -1,10 +1,32 @@
 import json
 import re
-from typing import Any, Dict, List, Optional
+from typing import Any, AsyncIterator, Dict, List, Optional
 
 import httpx
 
 from core.config import _llm_config, _llm_config_for_provider, TOOLS_SPEC
+
+# ── 全局 HTTP 连接池（复用 TCP+TLS 连接，减少每次请求 100-300ms 握手开销）──
+_shared_client: Optional[httpx.AsyncClient] = None
+
+
+def get_shared_client() -> httpx.AsyncClient:
+    """获取全局共享的 httpx.AsyncClient（懒初始化，应用生命周期内复用）"""
+    global _shared_client
+    if _shared_client is None or _shared_client.is_closed:
+        _shared_client = httpx.AsyncClient(
+            timeout=httpx.Timeout(60.0, connect=10.0),
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+        )
+    return _shared_client
+
+
+async def close_shared_client():
+    """应用关闭时调用，释放连接池"""
+    global _shared_client
+    if _shared_client and not _shared_client.is_closed:
+        await _shared_client.aclose()
+        _shared_client = None
 
 
 def extract_json_object(text: str) -> Optional[Dict[str, Any]]:
@@ -44,6 +66,7 @@ async def call_openai_compatible(
     model_override: Optional[str] = None,
     json_mode: bool = False,
     provider_override: Optional[str] = None,
+    max_tokens: Optional[int] = None,
 ) -> Dict[str, Any]:
     """调用OpenAI兼容的LLM接口 - 支持通义千问Qwen3-Max"""
     cfg = _llm_config_for_provider(provider_override)
@@ -85,13 +108,15 @@ async def call_openai_compatible(
         "temperature": 0.2,
     }
 
+    # max_tokens 限制生成长度，减少不必要的生成时间
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+
     # JSON mode：要求模型只输出 JSON（OpenAI-compatible）
     # DashScope 的 compatible-mode 同样支持该参数，因此统一走 response_format。
     if json_mode:
         payload["response_format"] = {"type": "json_object"}
 
-
-    timeout = httpx.Timeout(60.0, connect=10.0)
 
     def _extract_openai_like_message(obj: Dict[str, Any]) -> Dict[str, Any]:
         # OpenAI-compatible: { choices: [ { message: {...} } ] }
@@ -108,10 +133,10 @@ async def call_openai_compatible(
         return {}
 
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
-            data = r.json()
+        client = get_shared_client()
+        r = await client.post(url, json=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
     except httpx.TimeoutException as e:
         return {"ok": False, "error": f"LLM 请求超时: {str(e)}", "raw": {}}
     except httpx.HTTPStatusError as e:
@@ -148,10 +173,9 @@ async def call_openai_compatible(
                         },
                     }
                 ]
-                async with httpx.AsyncClient(timeout=timeout) as client:
-                    r2 = await client.post(url, json=payload2, headers=headers)
-                    r2.raise_for_status()
-                    data = r2.json()
+                r2 = await client.post(url, json=payload2, headers=headers)
+                r2.raise_for_status()
+                data = r2.json()
             except Exception as e2:
                 # 如果重试也失败，返回更有参考价值的原始错误信息
                 return {"ok": False, "error": f"LLM 请求异常 (重试也失败): {error_detail}", "raw": {}}
@@ -184,6 +208,76 @@ async def call_openai_compatible(
         return {"ok": False, "error": "empty llm reply", "raw": data}
     except Exception:
         return {"ok": False, "error": "invalid llm response", "raw": data}
+
+
+async def call_openai_compatible_stream(
+    messages: List[Dict[str, Any]],
+    model_override: Optional[str] = None,
+    provider_override: Optional[str] = None,
+    max_tokens: Optional[int] = None,
+) -> AsyncIterator[str]:
+    """
+    流式调用 LLM，逐 token yield。
+    用于最终回复阶段，实现 TTFA < 1s 的感知延迟。
+    """
+    cfg = _llm_config_for_provider(provider_override)
+    base_url = cfg["base_url"].rstrip("/")
+    api_key = cfg["api_key"]
+    model = model_override or cfg["model"]
+
+    if not base_url or not api_key:
+        yield "[LLM 未配置]"
+        return
+
+    is_dashscope = "dashscope" in base_url.lower() or "aliyun" in base_url.lower()
+
+    if is_dashscope:
+        if base_url.endswith("/chat/completions"):
+            url = base_url
+        elif base_url.endswith("/"):
+            url = f"{base_url}chat/completions"
+        else:
+            url = f"{base_url}/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}", "Content-Type": "application/json"}
+    else:
+        if base_url.endswith("/v1"):
+            url = f"{base_url}/chat/completions"
+        else:
+            url = f"{base_url}/v1/chat/completions"
+        headers = {"Authorization": f"Bearer {api_key}"}
+
+    payload: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": 0.7,
+        "stream": True,
+    }
+    if max_tokens:
+        payload["max_tokens"] = max_tokens
+
+    # 流式调用使用独立 client（避免共享连接池的缓冲问题）
+    try:
+        async with httpx.AsyncClient(timeout=httpx.Timeout(120.0, connect=10.0)) as client:
+            async with client.stream("POST", url, json=payload, headers=headers) as r:
+                r.raise_for_status()
+                async for line in r.aiter_lines():
+                    if not line.startswith("data: "):
+                        continue
+                    data_str = line[6:].strip()
+                    if data_str == "[DONE]":
+                        break
+                    try:
+                        chunk = json.loads(data_str)
+                        choices = chunk.get("choices") or []
+                        if choices:
+                            delta = choices[0].get("delta") or {}
+                            content = delta.get("content") or ""
+                            if content:
+                                yield content
+                    except json.JSONDecodeError:
+                        continue
+    except Exception as e:
+        yield f"\n[流式生成异常: {e}]"
 
 
 

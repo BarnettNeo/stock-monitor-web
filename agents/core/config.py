@@ -50,6 +50,20 @@ def _llm_config() -> Dict[str, str]:
     }
 
 
+def _llm_config_sub() -> Dict[str, str]:
+    """
+    获取子任务 LLM 配置（轻量快速模型）。
+    用于意图抽取、参数解析等简单任务，主模型用于用户最终回复。
+    环境变量：
+      - LLM_MODEL_SUB: 子任务模型名（如 qwen-turbo），默认回退主模型
+    """
+    cfg = _llm_config()
+    sub_model = _env("LLM_MODEL_SUB", "")
+    if sub_model:
+        cfg["model"] = sub_model
+    return cfg
+
+
 def _provider_key(provider: Optional[str]) -> str:
     s = str(provider or "").strip().lower()
     if not s:

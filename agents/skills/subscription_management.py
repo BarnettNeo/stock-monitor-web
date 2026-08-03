@@ -168,11 +168,69 @@ def _extract_action(message: str) -> Optional[str]:
     return None
 
 
+def heuristic_extract_subscription_intent(message: str) -> Dict[str, Any]:
+    """用正则/关键词提取订阅管理意图和参数（替代 LLM 调用）"""
+    text = (message or "").strip()
+    if not text:
+        return {}
+
+    result: Dict[str, Any] = {}
+
+    # 1. action
+    action = _extract_action(text)
+    if action:
+        result["action"] = action
+
+    # 2. subscriptionId（UUID）
+    uuid_match = re.search(r'[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}', text)
+    if uuid_match:
+        result["subscriptionId"] = uuid_match.group(0)
+
+    # 3. type（订阅类型）
+    sub_type = _extract_type_hint(text)
+    if sub_type:
+        result["type"] = sub_type
+
+    # 4. webhookUrl
+    webhook = _extract_webhook(text)
+    if webhook:
+        result["webhookUrl"] = webhook
+
+    # 5. name（引号内文本）
+    name_match = re.search(r'[""\'](.*?)[""\']|「(.*?)」', text)
+    if name_match:
+        result["name"] = name_match.group(1) or name_match.group(2) or ""
+
+    # 6. enabled
+    if re.search(r'启用|打开|开启|激活', text):
+        result["enabled"] = True
+    elif re.search(r'停用|关闭|禁用|暂停|停止', text):
+        result["enabled"] = False
+
+    # 7. keyword（关键词）
+    kw_match = re.search(r'关键词\s*[:：=]?\s*(\S+)', text)
+    if kw_match:
+        result["keyword"] = kw_match.group(1)
+
+    return result
+
+
 async def _llm_extract_subscription_intent(
     message: str,
     current: Dict[str, Any],
     model_override: Optional[str],
 ) -> Dict[str, Any]:
+    # 优先用启发式提取（0ms），仅在不足时回退 LLM（2-5s）
+    heuristic = heuristic_extract_subscription_intent(message)
+    has_sufficient = (
+        heuristic.get("action")
+        and any(heuristic.get(k) for k in [
+            "subscriptionId", "type", "webhookUrl", "name", "enabled", "keyword",
+        ])
+    )
+    if has_sufficient:
+        return heuristic
+
     prompt = {
         "instruction": "从用户自然语言中提取订阅管理意图和参数，只输出 JSON。",
         "output": {
@@ -209,7 +267,10 @@ async def _llm_extract_subscription_intent(
         {"role": "system", "content": "你是一个信息抽取器，只输出 JSON。"},
         {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
     ]
-    llm = await call_openai_compatible(messages, model_override=model_override, json_mode=True)
+    # 使用轻量子模型做意图抽取
+    from core.config import _llm_config_sub
+    sub_cfg = _llm_config_sub()
+    llm = await call_openai_compatible(messages, model_override=sub_cfg.get("model"), json_mode=True, max_tokens=512)
     if not llm.get("ok"):
         return {}
     obj = extract_json_object(str(llm.get("reply") or "")) or {}
@@ -228,18 +289,19 @@ async def _api_request(
     url = f"{_server_base_url()}{path}"
     headers = {"Authorization": auth_header, "Content-Type": "application/json"}
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
-        response = await client.request(
-            method=method.upper(),
-            url=url,
-            headers=headers,
-            params=params,
-            json=json_body,
-        )
-        try:
-            data = response.json()
-        except Exception:
-            data = {"message": response.text}
+    from llm.llm import get_shared_client
+    client = get_shared_client()
+    response = await client.request(
+        method=method.upper(),
+        url=url,
+        headers=headers,
+        params=params,
+        json=json_body,
+    )
+    try:
+        data = response.json()
+    except Exception:
+        data = {"message": response.text}
 
     if response.status_code >= 400:
         if isinstance(data, dict):

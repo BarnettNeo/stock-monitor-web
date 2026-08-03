@@ -5,6 +5,7 @@ from typing import Any, Dict, List, Optional
 import httpx
 
 from core.config import _env, _llm_config
+from llm.llm import get_shared_client
 
 
 def _normalize_openai_base_url(raw: str) -> str:
@@ -19,7 +20,7 @@ def _normalize_openai_base_url(raw: str) -> str:
 
 async def embed_texts(texts: List[str]) -> Dict[str, Any]:
     """
-    Call embedding endpoint.
+    Call embedding endpoint. Results are cached (30min TTL).
 
     Supports two modes:
       1. Self-hosted API: if EMBEDDING_BASE_URL is a full endpoint path (e.g. /api/embed),
@@ -31,6 +32,13 @@ async def embed_texts(texts: List[str]) -> Dict[str, Any]:
       - EMBEDDING_API_KEY (optional, defaults to LLM_API_KEY)
       - EMBEDDING_MODEL (optional, default: text-embedding-3-small)
     """
+    # 检查缓存
+    from infrastructure.cache import embedding_cache
+    cache_key = "|".join(texts)
+    cached = embedding_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     cfg = _llm_config()
     raw_url = _env("EMBEDDING_BASE_URL", cfg.get("base_url", ""))
     api_key = _env("EMBEDDING_API_KEY", cfg.get("api_key", ""))
@@ -47,12 +55,11 @@ async def embed_texts(texts: List[str]) -> Dict[str, Any]:
         if api_key:
             headers["Authorization"] = f"Bearer {api_key}"
 
-        timeout = httpx.Timeout(60.0, connect=10.0)
         try:
-            async with httpx.AsyncClient(timeout=timeout) as client:
-                r = await client.post(url, json=payload, headers=headers)
-                r.raise_for_status()
-                data = r.json()
+            client = get_shared_client()
+            r = await client.post(url, json=payload, headers=headers)
+            r.raise_for_status()
+            data = r.json()
         except Exception as e:
             return {"ok": False, "error": f"embedding request failed: {str(e)}", "vectors": []}
 
@@ -66,7 +73,9 @@ async def embed_texts(texts: List[str]) -> Dict[str, Any]:
                     vectors.append([float(x) for x in v])
             if len(vectors) != len(texts):
                 return {"ok": False, "error": "embedding count mismatch", "vectors": []}
-            return {"ok": True, "vectors": vectors, "raw": data}
+            result = {"ok": True, "vectors": vectors, "raw": data}
+            embedding_cache.set(cache_key, result)
+            return result
         except Exception:
             return {"ok": False, "error": "invalid embedding response", "vectors": []}
 
@@ -84,12 +93,11 @@ async def embed_texts(texts: List[str]) -> Dict[str, Any]:
     payload = {"model": model, "input": texts}
     headers = {"Authorization": f"Bearer {api_key}"}
 
-    timeout = httpx.Timeout(30.0, connect=10.0)
     try:
-        async with httpx.AsyncClient(timeout=timeout) as client:
-            r = await client.post(url, json=payload, headers=headers)
-            r.raise_for_status()
-            data = r.json()
+        client = get_shared_client()
+        r = await client.post(url, json=payload, headers=headers)
+        r.raise_for_status()
+        data = r.json()
     except Exception as e:
         return {"ok": False, "error": f"embedding request failed: {str(e)}", "vectors": []}
 
@@ -104,7 +112,9 @@ async def embed_texts(texts: List[str]) -> Dict[str, Any]:
                 vectors.append([float(x) for x in emb])
         if len(vectors) != len(texts):
             return {"ok": False, "error": "embedding count mismatch", "vectors": []}
-        return {"ok": True, "vectors": vectors, "raw": data}
+        result = {"ok": True, "vectors": vectors, "raw": data}
+        embedding_cache.set(cache_key, result)
+        return result
     except Exception:
         return {"ok": False, "error": "invalid embedding response", "vectors": []}
 

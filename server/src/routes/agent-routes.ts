@@ -515,7 +515,7 @@ async function executeToolCall(user: AuthedUser, call: ToolCall): Promise<ToolRe
 
 export function registerAgentRoutes(app: Express): void {
   // Agent 网关：
-  // - /api/agent/chat：由 Node 作为 tools 执行器，进行多轮编排
+  // - /api/agent/chat：由 Node 作为 tools 执行器，进行多轮编排（SSE 流式）
   // - /api/agent/health：探活
 
   app.post('/api/agent/chat', async (req: Request, res: Response) => {
@@ -526,7 +526,6 @@ export function registerAgentRoutes(app: Express): void {
     if (!message) return res.status(400).json({ message: 'message 不能为空' });
 
     const baseUrl = getAgentsBaseUrl();
-    console.log(`baseUrl`, baseUrl);
     const basePayload = {
       message,
       context: req.body?.context,
@@ -534,43 +533,174 @@ export function registerAgentRoutes(app: Express): void {
       auth: { authorization: String(req.headers.authorization || '') },
     };
 
+    // 设置 SSE 响应头
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+    res.setHeader('X-Accel-Buffering', 'no');
+
+    const sendSSE = (data: Record<string, unknown>): void => {
+      res.write(`data: ${JSON.stringify(data)}\n\n`);
+    };
+
     const maxSteps = 3;
     const toolResults: ToolResult[] = [];
 
+    // 客户端断开时标记
+    let aborted = false;
+    req.on('close', () => { aborted = true; });
+
     try {
       for (let step = 0; step < maxSteps; step++) {
-        // 由上游 agent 决定是否继续调用工具；这里作为受控执行器仅返回工具结果。
-        const r = await axios.post(
-          `${baseUrl}/agent/chat`,
-          {
-            ...basePayload,
-            toolResults,
-          },
-          { timeout: 60000 },
-        );
-        const data = r.data || {};
-        const toolCalls: ToolCall[] = Array.isArray(data.toolCalls) ? data.toolCalls : [];
+        if (aborted) break;
 
-        if (toolCalls.length > 0) {
-          const safeCalls = toolCalls.slice(0, 5);
-          const results = await Promise.all(safeCalls.map((c) => executeToolCall(user, c)));
-          toolResults.push(...results);
-          continue;
+        // 调用 Python agent 流式端点
+        const upstreamRes = await axios.post(
+          `${baseUrl}/agent/chat/stream`,
+          { ...basePayload, toolResults },
+          {
+            timeout: 120000,
+            responseType: 'stream',
+            validateStatus: () => true,
+          },
+        );
+
+        const upstreamStatus = upstreamRes.status;
+        const upstreamType = String(upstreamRes.headers['content-type'] || '');
+
+        // 非 200 → 透传错误
+        if (upstreamStatus !== 200) {
+          const chunks: Buffer[] = [];
+          await new Promise<void>((resolve) => {
+            upstreamRes.data.on('data', (chunk: Buffer) => chunks.push(chunk));
+            upstreamRes.data.on('end', resolve);
+            upstreamRes.data.on('error', resolve);
+          });
+          const body = Buffer.concat(chunks).toString('utf-8');
+          try {
+            const errData = JSON.parse(body);
+            sendSSE({ error: true, message: errData.message || errData.detail || 'agents 服务错误', status: upstreamStatus });
+          } catch {
+            sendSSE({ error: true, message: body || 'agents 服务错误', status: upstreamStatus });
+          }
+          res.end();
+          return;
         }
 
-        // final
-        return res.json({ ...data, meta: { ...(data.meta || {}), orchestrator: 'node', steps: step + 1 } });
+        if (upstreamType.includes('text/event-stream')) {
+          // SSE 流式响应 → 逐 chunk 转发给前端
+          let buffer = '';
+          let hasToolCalls = false;
+          let toolCallsData: any = null;
+
+          await new Promise<void>((resolve, reject) => {
+            upstreamRes.data.on('data', (chunk: Buffer) => {
+              if (aborted) return;
+              buffer += chunk.toString('utf-8');
+
+              // 解析完整的 SSE 行
+              const lines = buffer.split('\n');
+              buffer = lines.pop() || '';
+
+              for (const line of lines) {
+                const trimmed = line.trim();
+                if (!trimmed) continue;
+
+                if (trimmed.startsWith('data: ')) {
+                  const payload = trimmed.slice(6);
+                  try {
+                    const parsed = JSON.parse(payload);
+                    // 检测 tool_calls
+                    if (parsed.toolCalls && Array.isArray(parsed.toolCalls) && parsed.toolCalls.length > 0) {
+                      hasToolCalls = true;
+                      toolCallsData = parsed;
+                    } else {
+                      // 普通 SSE 事件 → 直接转发
+                      res.write(`data: ${JSON.stringify(parsed)}\n\n`);
+                    }
+                  } catch {
+                    // 非 JSON 的 data 行，原样转发
+                    res.write(`${trimmed}\n\n`);
+                  }
+                } else if (trimmed.startsWith('{')) {
+                  // Python stream_decision() 对 tool_calls 返回裸 JSON（无 data: 前缀）
+                  try {
+                    const parsed = JSON.parse(trimmed);
+                    if (parsed.toolCalls && Array.isArray(parsed.toolCalls) && parsed.toolCalls.length > 0) {
+                      hasToolCalls = true;
+                      toolCallsData = parsed;
+                    }
+                  } catch {
+                    // 非 JSON 行，忽略
+                  }
+                }
+                // 忽略 event:/id:/retry: 等 SSE 字段
+              }
+            });
+            upstreamRes.data.on('end', resolve);
+            upstreamRes.data.on('error', reject);
+          });
+
+          if (aborted) { res.end(); return; }
+
+          // 如果 Python 返回了 tool_calls → 执行工具，继续下一轮
+          if (hasToolCalls && toolCallsData) {
+            const rawCalls: ToolCall[] = Array.isArray(toolCallsData.toolCalls) ? toolCallsData.toolCalls : [];
+            const safeCalls = rawCalls.slice(0, 5);
+            if (safeCalls.length > 0) {
+              // 通知前端正在执行工具
+              sendSSE({ toolExecuting: true, tools: safeCalls.map((c) => c.name) });
+              const results = await Promise.all(safeCalls.map((c) => executeToolCall(user, c)));
+              toolResults.push(...results);
+              continue; // 下一轮编排
+            }
+          }
+
+          // SSE 流正常结束（final reply 已转发）
+          res.end();
+          return;
+        }
+
+        // 非 SSE（JSON）→ Python 返回了 tool_calls 或 skill 结果
+        const chunks: Buffer[] = [];
+        await new Promise<void>((resolve) => {
+          upstreamRes.data.on('data', (chunk: Buffer) => chunks.push(chunk));
+          upstreamRes.data.on('end', resolve);
+          upstreamRes.data.on('error', resolve);
+        });
+        const body = Buffer.concat(chunks).toString('utf-8');
+        let data: any;
+        try {
+          data = JSON.parse(body);
+        } catch {
+          sendSSE({ error: true, message: 'agents 返回了无法解析的响应' });
+          res.end();
+          return;
+        }
+
+        const toolCalls: ToolCall[] = Array.isArray(data.toolCalls) ? data.toolCalls : [];
+        if (toolCalls.length > 0) {
+          const safeCalls = toolCalls.slice(0, 5);
+          sendSSE({ toolExecuting: true, tools: safeCalls.map((c) => c.name) });
+          const results = await Promise.all(safeCalls.map((c) => executeToolCall(user, c)));
+          toolResults.push(...results);
+          continue; // 下一轮编排
+        }
+
+        // 无 toolCalls 且非 SSE → skill 结果或直接回复，转为 SSE 发给前端
+        const reply = String(data.reply || '').trim() || '抱歉，AI 未能生成有效回复，请换个说法重试。';
+        sendSSE({ token: reply, done: true, reply, meta: { ...(data.meta || {}), orchestrator: 'node', steps: step + 1 } });
+        res.end();
+        return;
       }
 
-      return res.status(500).json({
-        message: 'Agent 编排达到最大轮次，请缩小问题或分步操作。',
-        toolResults,
-      });
-    } catch (e: any) {
-      const status = Number(e?.response?.status || 503);
-      const detail = e?.response?.data || null;
-      const msg = e?.message || 'agents service unavailable';
-      return res.status(status).json({ message: 'agents 服务不可用', error: msg, detail });
+      // 超过最大编排轮次
+      sendSSE({ error: true, message: 'Agent 编排达到最大轮次，请缩小问题或分步操作。', toolResults });
+      res.end();
+    } catch (e: unknown) {
+      const msg = (e as Error)?.message || 'agents service unavailable';
+      sendSSE({ error: true, message: 'agents 服务不可用', errorDetail: msg });
+      res.end();
     }
   });
 

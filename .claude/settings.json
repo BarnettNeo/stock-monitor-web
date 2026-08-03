@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "ccto": {
+      "command": "ccto",
+      "args": [
+        "serve"
+      ]
+    }
+  }
+}

@@ -1,0 +1,170 @@
+[
+  {
+    "tool": "semantic_search",
+    "tokensRequested": 5091,
+    "tokensServed": 1818,
+    "savedTokens": 3273,
+    "timestamp": "2026-06-09T06:30:25.284Z"
+  },
+  {
+    "tool": "semantic_search",
+    "tokensRequested": 5091,
+    "tokensServed": 1818,
+    "savedTokens": 3273,
+    "timestamp": "2026-06-09T06:30:25.319Z"
+  },
+  {
+    "tool": "semantic_search",
+    "tokensRequested": 4044,
+    "tokensServed": 1471,
+    "savedTokens": 2573,
+    "timestamp": "2026-06-09T06:30:30.457Z"
+  },
+  {
+    "tool": "semantic_search",
+    "tokensRequested": 4044,
+    "tokensServed": 1471,
+    "savedTokens": 2573,
+    "timestamp": "2026-06-09T06:30:30.488Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 4020,
+    "tokensServed": 1025,
+    "savedTokens": 2995,
+    "timestamp": "2026-06-09T06:30:33.313Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 4020,
+    "tokensServed": 1025,
+    "savedTokens": 2995,
+    "timestamp": "2026-06-09T06:30:33.319Z"
+  },
+  {
+    "tool": "smart_read",
+    "tokensRequested": 4442,
+    "tokensServed": 4465,
+    "savedTokens": 0,
+    "timestamp": "2026-06-09T06:30:41.532Z"
+  },
+  {
+    "tool": "smart_read",
+    "tokensRequested": 4442,
+    "tokensServed": 4465,
+    "savedTokens": 0,
+    "timestamp": "2026-06-09T06:30:41.532Z"
+  },
+  {
+    "tool": "smart_read",
+    "tokensRequested": 9008,
+    "tokensServed": 9032,
+    "savedTokens": 0,
+    "timestamp": "2026-06-09T06:30:46.032Z"
+  },
+  {
+    "tool": "smart_read",
+    "tokensRequested": 9008,
+    "tokensServed": 9032,
+    "savedTokens": 0,
+    "timestamp": "2026-06-09T06:30:46.032Z"
+  },
+  {
+    "tool": "smart_read",
+    "tokensRequested": 5422,
+    "tokensServed": 5439,
+    "savedTokens": 0,
+    "timestamp": "2026-06-09T06:30:56.013Z"
+  },
+  {
+    "tool": "smart_read",
+    "tokensRequested": 5422,
+    "tokensServed": 5439,
+    "savedTokens": 0,
+    "timestamp": "2026-06-09T06:30:56.013Z"
+  },
+  {
+    "tool": "semantic_search",
+    "tokensRequested": 4191,
+    "tokensServed": 1472,
+    "savedTokens": 2719,
+    "timestamp": "2026-06-09T06:33:55.700Z"
+  },
+  {
+    "tool": "semantic_search",
+    "tokensRequested": 4191,
+    "tokensServed": 1472,
+    "savedTokens": 2719,
+    "timestamp": "2026-06-09T06:33:55.732Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 4020,
+    "tokensServed": 1025,
+    "savedTokens": 2995,
+    "timestamp": "2026-06-11T06:22:13.120Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 4020,
+    "tokensServed": 1025,
+    "savedTokens": 2995,
+    "timestamp": "2026-06-11T06:22:13.129Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 6280,
+    "tokensServed": 1722,
+    "savedTokens": 4558,
+    "timestamp": "2026-06-11T06:22:28.666Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 6280,
+    "tokensServed": 1722,
+    "savedTokens": 4558,
+    "timestamp": "2026-06-11T06:22:28.674Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 6280,
+    "tokensServed": 1722,
+    "savedTokens": 4558,
+    "timestamp": "2026-06-11T06:22:29.103Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 6280,
+    "tokensServed": 1722,
+    "savedTokens": 4558,
+    "timestamp": "2026-06-11T06:22:29.112Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 4020,
+    "tokensServed": 1025,
+    "savedTokens": 2995,
+    "timestamp": "2026-06-11T06:22:31.391Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 4020,
+    "tokensServed": 1025,
+    "savedTokens": 2995,
+    "timestamp": "2026-06-11T06:22:31.397Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 4020,
+    "tokensServed": 1025,
+    "savedTokens": 2995,
+    "timestamp": "2026-06-11T06:22:35.397Z"
+  },
+  {
+    "tool": "project_outline",
+    "tokensRequested": 4020,
+    "tokensServed": 1025,
+    "savedTokens": 2995,
+    "timestamp": "2026-06-11T06:22:35.402Z"
+  }
+]

@@ -249,6 +249,86 @@ def _extract_action(message: str) -> Optional[str]:
     return None
 
 
+def heuristic_extract_strategy_intent(message: str) -> Dict[str, Any]:
+    """用正则/关键词提取策略管理意图和参数（替代 LLM 调用，节省 2-5 秒）"""
+    text = (message or "").strip()
+    if not text:
+        return {}
+
+    result: Dict[str, Any] = {}
+
+    # 1. action（复用已有关键词检测）
+    action = _extract_action(text)
+    if action:
+        result["action"] = action
+
+    # 2. symbols（股票代码）
+    from domain.strategy import extract_symbols_from_text
+    symbols = extract_symbols_from_text(text)
+    if symbols:
+        result["symbols"] = symbols
+
+    # 3. name（策略名称，引号内文本）
+    name = _extract_quoted_name(text)
+    if name:
+        result["name"] = name
+
+    # 4. priceAlertPercent — "阈值 2%" / "涨跌幅 3%" / "2% 提醒"
+    pct_match = re.search(r'(?:阈值|涨跌[幅口]?|跌幅|涨幅|百分之)\s*(\d+(?:\.\d+)?)\s*%?', text)
+    if not pct_match:
+        pct_match = re.search(r'(\d+(?:\.\d+)?)\s*%\s*(?:提醒|通知|报警|告警)', text)
+    if pct_match:
+        result["priceAlertPercent"] = float(pct_match.group(1))
+        result.setdefault("alertMode", "percent")
+
+    # 5. targetPriceUp/Down — "涨到 200" / "跌破 180" / "目标价 200"
+    target_up = re.search(r'(?:涨到|突破|超过|高于|目标价)\s*(\d+(?:\.\d+)?)', text)
+    if target_up:
+        result["targetPriceUp"] = float(target_up.group(1))
+        result.setdefault("alertMode", "target")
+
+    target_down = re.search(r'(?:跌破|低于|跌到|低于)\s*(\d+(?:\.\d+)?)', text)
+    if target_down:
+        result["targetPriceDown"] = float(target_down.group(1))
+        result.setdefault("alertMode", "target")
+
+    # 6. alertMode — 显式关键词
+    if re.search(r'目标价|涨到|跌破|区间', text):
+        result.setdefault("alertMode", "target")
+    elif re.search(r'百分比|阈值|涨跌幅', text):
+        result.setdefault("alertMode", "percent")
+
+    # 7. enabled — "启用" / "停用" / "关闭" / "打开"
+    if re.search(r'启用|打开|开启|激活', text):
+        result["enabled"] = True
+    elif re.search(r'停用|关闭|禁用|暂停|停止', text):
+        result["enabled"] = False
+
+    # 8. intervalMinutes — "间隔 30 分钟" / "每 10 分钟"
+    interval_match = re.search(r'(?:间隔|每隔|每)\s*(\d+)\s*(?:分钟|min)', text, re.IGNORECASE)
+    if interval_match:
+        result["intervalMinutes"] = int(interval_match.group(1))
+
+    # 9. cooldownMinutes — "冷却 60 分钟"
+    cooldown_match = re.search(r'冷却\s*(\d+)\s*(?:分钟|min)', text, re.IGNORECASE)
+    if cooldown_match:
+        result["cooldownMinutes"] = int(cooldown_match.group(1))
+
+    # 10. 技术指标关键词
+    if re.search(r'MACD|金叉|死叉', text, re.IGNORECASE):
+        result["enableMacdGoldenCross"] = True
+    if re.search(r'RSI\s*(?:超卖|低于|<)', text, re.IGNORECASE):
+        result["enableRsiOversold"] = True
+    if re.search(r'RSI\s*(?:超买|高于|>)', text, re.IGNORECASE):
+        result["enableRsiOverbought"] = True
+    if re.search(r'均线|MA|移动平均', text, re.IGNORECASE):
+        result["enableMovingAverages"] = True
+    if re.search(r'形态|K线形态|信号', text, re.IGNORECASE):
+        result["enablePatternSignal"] = True
+
+    return result
+
+
 async def _llm_extract_strategy_intent(
     message: str,
     current: Dict[str, Any],
@@ -294,7 +374,10 @@ async def _llm_extract_strategy_intent(
         {"role": "system", "content": "你是一个信息抽取器，只输出 JSON。"},
         {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
     ]
-    llm = await call_openai_compatible(messages, model_override=model_override, json_mode=True)
+    # 使用轻量子模型（qwen-turbo）做意图抽取，节省时间
+    from core.config import _llm_config_sub
+    sub_cfg = _llm_config_sub()
+    llm = await call_openai_compatible(messages, model_override=sub_cfg.get("model"), json_mode=True, max_tokens=512)
     if not llm.get("ok"):
         return {}
 
@@ -316,18 +399,19 @@ async def _api_request(
     url = f"{_server_base_url()}{path}"
     headers = {"Authorization": auth_header, "Content-Type": "application/json"}
 
-    async with httpx.AsyncClient(timeout=httpx.Timeout(20.0, connect=8.0)) as client:
-        response = await client.request(
-            method=method.upper(),
-            url=url,
-            headers=headers,
-            params=params,
-            json=json_body,
-        )
-        try:
-            data = response.json()
-        except Exception:
-            data = {"message": response.text}
+    from llm.llm import get_shared_client
+    client = get_shared_client()
+    response = await client.request(
+        method=method.upper(),
+        url=url,
+        headers=headers,
+        params=params,
+        json=json_body,
+    )
+    try:
+        data = response.json()
+    except Exception:
+        data = {"message": response.text}
 
     if response.status_code >= 400:
         if isinstance(data, dict):
@@ -1044,7 +1128,22 @@ async def handle_strategy_management_skill(
     if named:
         draft["name"] = named
 
-    if cfg_ok:
+    # 优先用正则/启发式提取（0ms），仅在提取结果不足时回退 LLM（2-5s）
+    heuristic_patch = heuristic_extract_strategy_intent(message)
+    if isinstance(heuristic_patch, dict) and heuristic_patch:
+        draft = merge_args(draft, heuristic_patch)
+
+    # 启发式提取到 action + 至少一个有效字段时，跳过 LLM 调用
+    has_sufficient = (
+        draft.get("action")
+        and any(draft.get(k) for k in [
+            "symbols", "name", "priceAlertPercent", "targetPriceUp",
+            "targetPriceDown", "enabled", "intervalMinutes", "cooldownMinutes",
+            "enableMacdGoldenCross", "enableRsiOversold", "enableRsiOverbought",
+            "enableMovingAverages", "enablePatternSignal",
+        ])
+    )
+    if cfg_ok and not has_sufficient:
         llm_patch = await _llm_extract_strategy_intent(message, draft, req_model)
         if isinstance(llm_patch, dict):
             draft = merge_args(draft, llm_patch)

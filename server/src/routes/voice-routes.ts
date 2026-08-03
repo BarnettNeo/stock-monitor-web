@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import fs from 'node:fs/promises';
 import path from 'node:path';
+import { WebSocket } from 'ws';
 
 import type { Express, Request, Response } from 'express';
 import express from 'express';
@@ -509,6 +510,118 @@ async function getAliyunAsrToken(req: Request, res: Response): Promise<void> {
   }
 }
 
+// ── Edge-TTS 语音合成（WebSocket 直推，无文件中转）──────────────
+
+const TRUSTED_CLIENT_TOKEN = '6A5AA1D4EAFF4E9FB37E23D68491D6F4';
+const CHROMIUM_FULL_VERSION = '143.0.3650.75';
+const WINDOWS_FILE_TIME_EPOCH = 11644473600n;
+
+function generateSecMsGecToken(): string {
+  const ticks = BigInt(Math.floor(Date.now() / 1000) + Number(WINDOWS_FILE_TIME_EPOCH)) * 10000000n;
+  const rounded = ticks - (ticks % 3000000000n);
+  return crypto.createHash('sha256').update(`${rounded}${TRUSTED_CLIENT_TOKEN}`, 'ascii').digest('hex').toUpperCase();
+}
+
+function escapeXml(s: string): string {
+  return s.replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&apos;' }[c]!));
+}
+
+const TTSRequestBodySchema = z.object({
+  text: z.string().min(1).max(5000),
+  voice: z.string().optional().default('zh-CN-XiaoxiaoNeural'),
+  lang: z.enum(['zh-CN', 'en-US']).optional().default('zh-CN'),
+  rate: z.string().optional().default('+0%'),
+});
+
+async function synthesizeWithEdgeTTS(req: Request, res: Response): Promise<void> {
+  const user = await requireAuth(req, res);
+  if (!user) return;
+
+  const parsed = TTSRequestBodySchema.safeParse(req.body);
+  if (!parsed.success) {
+    res.status(400).json({ ok: false, message: '参数错误：text 为必填（1-5000 字符）' });
+    return;
+  }
+
+  const { text, voice, lang, rate } = parsed.data;
+
+  const rateNum = parseInt(rate.replace(/[+%]/g, '')) || 0;
+  const rateStr = rateNum === 0 ? 'default' : (rateNum > 0 ? `+${rateNum}%` : `${rateNum}%`);
+  const outputFormat = 'audio-24khz-48kbitrate-mono-mp3';
+  const wsUrl = `wss://speech.platform.bing.com/consumer/speech/synthesize/readaloud/edge/v1?TrustedClientToken=${TRUSTED_CLIENT_TOKEN}&Sec-MS-GEC=${generateSecMsGecToken()}&Sec-MS-GEC-Version=1-${CHROMIUM_FULL_VERSION}`;
+
+  const muid = crypto.randomBytes(16).toString('hex').toUpperCase();
+
+  const ws = new WebSocket(wsUrl, {
+    host: 'speech.platform.bing.com',
+    origin: 'chrome-extension://jdiccldimpdaibmpdkjnbmckianbfold',
+    headers: {
+      'Pragma': 'no-cache',
+      'Cache-Control': 'no-cache',
+      'Cookie': `muid=${muid};`,
+      'User-Agent': `Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROMIUM_FULL_VERSION.split('.')[0]}.0.0.0 Safari/537.36 Edg/${CHROMIUM_FULL_VERSION.split('.')[0]}.0.0.0`,
+      'Accept-Encoding': 'gzip, deflate, br, zstd',
+      'Accept-Language': 'en-US,en;q=0.9',
+    },
+  });
+
+  res.setHeader('Content-Type', 'audio/mpeg');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Transfer-Encoding', 'chunked');
+
+  const timeout = setTimeout(() => {
+    ws.close();
+    if (!res.headersSent) {
+      res.status(500).json({ ok: false, message: 'Edge-TTS 合成超时' });
+    } else {
+      res.end();
+    }
+  }, 30000);
+
+  ws.on('open', () => {
+    ws.send(`Content-Type:application/json; charset=utf-8\r\nPath:speech.config\r\n\r\n
+      {"context":{"synthesis":{"audio":{"metadataoptions":{"sentenceBoundaryEnabled":"false","wordBoundaryEnabled":"false"},"outputFormat":"${outputFormat}"}}}}`);
+
+    const requestId = crypto.randomBytes(16).toString('hex');
+    ws.send(`X-RequestId:${requestId}\r\nContent-Type:application/ssml+xml\r\nPath:ssml\r\n\r\n
+      <speak version="1.0" xmlns="http://www.w3.org/2001/10/synthesis" xml:lang="${lang}">
+        <voice name="${voice}">
+          <prosody rate="${rateStr}">
+            ${escapeXml(text)}
+          </prosody>
+        </voice>
+      </speak>`);
+  });
+
+  ws.on('message', (data: Buffer, isBinary: boolean) => {
+    if (isBinary) {
+      const sep = 'Path:audio\r\n';
+      const idx = data.indexOf(sep);
+      if (idx >= 0) {
+        const audioChunk = data.subarray(idx + sep.length);
+        res.write(audioChunk);
+      }
+    } else {
+      const msg = data.toString();
+      if (msg.includes('Path:turn.end')) {
+        clearTimeout(timeout);
+        ws.close();
+        res.end();
+      }
+    }
+  });
+
+  ws.on('error', (err) => {
+    clearTimeout(timeout);
+    console.error('[EdgeTTS] WebSocket error:', err.message);
+    if (!res.headersSent) {
+      res.status(500).json({ ok: false, message: `Edge-TTS 合成失败: ${err.message}` });
+    } else {
+      res.end();
+    }
+  });
+}
+
 export function registerVoiceRoutes(app: Express): void {
   app.post(
     '/api/voice/recordings',
@@ -522,4 +635,5 @@ export function registerVoiceRoutes(app: Express): void {
   app.get('/api/voice/asr/providers', getVoiceAsrProviders);
   app.get('/api/voice/asr/aliyun/config', getAliyunAsrConfig);
   app.get('/api/voice/asr/aliyun/token', getAliyunAsrToken);
+  app.post('/api/voice/tts', express.json(), synthesizeWithEdgeTTS);
 }

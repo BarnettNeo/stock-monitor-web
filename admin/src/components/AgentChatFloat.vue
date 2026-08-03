@@ -54,6 +54,91 @@
                     <el-option label="英文" value="en-US" />
                   </el-select>
                 </div>
+                <div class="voice-config-divider" />
+                <div class="voice-config-item">
+                  <label class="voice-config-label">🔊 TTS 服务</label>
+                  <el-select
+                    v-model="ttsConfig.provider"
+                    size="small"
+                    class="voice-config-select"
+                    @change="ttsConfigManager.update('provider', ttsConfig.provider)"
+                  >
+                    <el-option label="浏览器内置" value="browser" />
+                    <el-option label="Edge-TTS（高质量）" value="edge" />
+                  </el-select>
+                </div>
+                <div class="voice-config-item">
+                  <label class="voice-config-label">合成语言</label>
+                  <el-select
+                    v-model="ttsConfig.lang"
+                    size="small"
+                    class="voice-config-select"
+                    @change="ttsConfigManager.update('lang', ttsConfig.lang)"
+                  >
+                    <el-option label="中文" value="zh-CN" />
+                    <el-option label="英文" value="en-US" />
+                  </el-select>
+                </div>
+                <div class="voice-config-item">
+                  <label class="voice-config-label">播报音色</label>
+                  <el-select
+                    v-model="ttsConfig.voice"
+                    size="small"
+                    class="voice-config-select"
+                    @change="ttsConfigManager.update('voice', ttsConfig.voice)"
+                  >
+                    <el-option
+                      v-for="v in ttsConfigManager.currentVoices()"
+                      :key="v.value"
+                      :label="v.label"
+                      :value="v.value"
+                    />
+                  </el-select>
+                </div>
+                <div class="voice-config-item">
+                  <label class="voice-config-label">语速</label>
+                  <div class="voice-config-slider-row">
+                    <span class="voice-config-slider-label">慢</span>
+                    <el-slider
+                      :model-value="ttsConfigManager.rateValue()"
+                      :min="-50"
+                      :max="100"
+                      :step="10"
+                      class="voice-config-slider"
+                      @change="handleTTSRateChange"
+                    />
+                    <span class="voice-config-slider-label">快</span>
+                  </div>
+                </div>
+                <div class="voice-config-divider" />
+                <div class="voice-config-item">
+                  <label class="voice-config-label">🧪 测试播报</label>
+                  <div class="voice-config-test-row">
+                    <el-input
+                      v-model="ttsTestText"
+                      size="small"
+                      placeholder="输入测试文本"
+                      class="voice-config-test-input"
+                    />
+                    <el-button
+                      size="small"
+                      type="primary"
+                      :disabled="!ttsTestText.trim() || tts.isSpeaking.value"
+                      @click="handleTestTTS"
+                    >
+                      {{ tts.isSpeaking.value ? '播报中...' : '试听' }}
+                    </el-button>
+                    <el-button
+                      v-if="tts.isSpeaking.value"
+                      size="small"
+                      type="danger"
+                      plain
+                      @click="tts.stop()"
+                    >
+                      停止
+                    </el-button>
+                  </div>
+                </div>
               </div>
             </el-popover>
             <el-select
@@ -80,7 +165,22 @@
 
           <div v-for="(m, idx) in viewMessages" :key="idx" class="agent-msg" :class="m.role">
             <!-- <div class="agent-msg-role">{{ m.roleLabel }}</div> -->
-            <div class="agent-msg-content">{{ m.content }}</div>
+            <div class="agent-msg-content" :class="{ 'is-streaming': m.streaming }">
+              {{ m.content }}<span v-if="m.streaming" class="streaming-cursor" />
+            </div>
+            <!-- AI 回复播放按钮 -->
+            <button
+              v-if="m.role === 'assistant'"
+              class="msg-tts-btn"
+              :class="{ active: playingMsgIdx === idx }"
+              :title="playingMsgIdx === idx ? '停止播放' : '播放语音'"
+              @click="handlePlayMessage(m.content, idx)"
+            >
+              <el-icon :size="14">
+                <VideoPause v-if="playingMsgIdx === idx" />
+                <VideoPlay v-else />
+              </el-icon>
+            </button>
           </div>
 
           <!-- 识别中间结果气泡 -->
@@ -93,8 +193,12 @@
             </div>
           </div>
 
-          <div v-if="sending" class="agent-float-sending flex align-center justify-center">
-            <el-icon size="20"><Loading /></el-icon>
+          <div v-if="sending" class="agent-msg assistant">
+            <div class="agent-msg-content sending-bubble">
+              <span class="dot-typing" />
+              <span class="dot-typing dot-typing-2" />
+              <span class="dot-typing dot-typing-3" />
+            </div>
           </div>
         </div>
 
@@ -160,17 +264,19 @@
 <script setup lang="ts">
 import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { ElMessage } from 'element-plus';
-import { ChatDotRound, ChatLineRound, Loading, Setting } from '@element-plus/icons-vue';
-import { api } from '../api';
+import { ChatDotRound, ChatLineRound, Setting, VideoPlay, VideoPause } from '@element-plus/icons-vue';
+import { api, getAuthToken } from '../api';
 import { useASR } from '../composables/useASR';
 import { useAliyunASR } from '../composables/useAliyunASR';
+import { useTTS } from '../composables/useTTS';
+import { useTTSConfig } from '../composables/useTTSConfig';
 import { useVAD } from '../composables/useVAD';
 import VoiceMicButton from './VoiceMicButton.vue';
 import VoiceWaveformAnimation from './VoiceWaveformAnimation.vue';
 import VoicePermissionModal from './VoicePermissionModal.vue';
 
 type MsgRole = 'user' | 'assistant' | 'system';
-type Msg = { role: MsgRole; content: string; ts: number };
+type Msg = { role: MsgRole; content: string; ts: number; streaming?: boolean };
 type VoiceState = 'idle' | 'requesting' | 'listening' | 'recording' | 'processing' | 'responding' | 'speaking' | 'error';
 
 const STORAGE_MODEL_KEY = 'agent_llm_model';
@@ -181,8 +287,8 @@ const draft = ref('');
 const sending = ref(false);
 const messages = ref<Msg[]>([]);
 
-const modelOptions = ref<string[]>(['qwen3.5-plus', 'qwen3.5-35b-a3b', 'qwen3.5-plus-2026-02-15']);
-const model = ref<string>('qwen3.5-plus');
+const modelOptions = ref<string[]>(['qwen3.6-flash', 'qwen3.7-plus', 'deepseek-v4-flash']);
+const model = ref<string>('qwen3.6-flash');
 
 const listEl = ref<HTMLElement | null>(null);
 
@@ -197,6 +303,40 @@ const volume = ref(0);
 const interimText = ref('');
 const recognizedText = ref('');
 const showPermissionModal = ref(false);
+
+// ── TTS 配置 ──────────────────────────────────────────────
+const ttsConfigManager = useTTSConfig();
+const ttsConfig = ttsConfigManager.config;
+
+function handleTTSRateChange(v: number): void {
+  ttsConfigManager.setRate(v);
+}
+
+const ttsTestText = ref(ttsConfig.value.lang === 'en-US'
+  ? 'Hello! This is a test of the text-to-speech engine.'
+  : '你好！这是语音合成引擎的测试。祝你投资顺利，收益长虹。');
+
+function handleTestTTS(): void {
+  const text = ttsTestText.value.trim();
+  if (!text) return;
+  tts.speak(text, ttsConfig.value);
+}
+
+// ── 消息 TTS 播放 ──────────────────────────────────────────
+const playingMsgIdx = ref(-1);
+
+function handlePlayMessage(content: string, idx: number): void {
+  // 点击正在播放的消息 → 停止
+  if (playingMsgIdx.value === idx) {
+    tts.stop();
+    playingMsgIdx.value = -1;
+    return;
+  }
+  if (!content.trim()) return;
+  playingMsgIdx.value = idx;
+  tts.speak(content, ttsConfig.value);
+}
+
 // 保存最终识别的文本，用于取消/重录
 const transcriptBuffer = ref('');
 // 记录当前输入是否来自语音，用于 LLM 回复后自动保存录音记录
@@ -206,6 +346,25 @@ const isListening = computed(() => voiceState.value === 'listening' || voiceStat
 const inputPlaceholder = computed(() => {
   if (isListening.value) return '正在聆听... 或直接在此输入文字';
   return '输入内容，回车发送（Shift+Enter 换行）';
+});
+
+// ── TTS 语音合成 ──────────────────────────────────────────
+const tts = useTTS({
+  onStart: () => {
+    voiceState.value = 'speaking';
+  },
+  onEnd: () => {
+    voiceState.value = 'idle';
+  },
+  onError: (err) => {
+    ElMessage.warning(err);
+    voiceState.value = 'idle';
+  },
+});
+
+// TTS 结束时清除播放标记
+watch(() => tts.isSpeaking.value, (speaking) => {
+  if (!speaking) playingMsgIdx.value = -1;
 });
 
 // ── ASR 语音识别 ──────────────────────────────────────────
@@ -280,6 +439,12 @@ const vad = useVAD(
 
 // ── 激活麦克风 ───────────────────────────────────────────
 async function handleActivateMic(): Promise<void> {
+  // 如果 TTS 正在播报，先停止播报
+  if (voiceState.value === 'speaking') {
+    tts.stop();
+    voiceState.value = 'idle';
+  }
+
   if (voiceState.value === 'listening') {
     // 点击停止录音
     stopRecordingAndSubmit();
@@ -458,6 +623,7 @@ function handleRetryPermission(): void {
 
 /** 停止 TTS 朗读 */
 function handleStopSpeaking(): void {
+  tts.stop();
   voiceState.value = 'idle';
 }
 
@@ -537,6 +703,7 @@ const viewMessages = computed(() => {
   return messages.value.map((m) => ({
     ...m,
     roleLabel: m.role === 'user' ? '我' : m.role === 'assistant' ? 'AI' : '系统',
+    streaming: m.streaming ?? false,
   }));
 });
 
@@ -574,7 +741,7 @@ function saveModelToStorage(): void {
   }
 }
 
-// 发送消息
+// 发送消息（支持 SSE 流式输出）
 async function send(): Promise<void> {
   const text = draft.value.trim();
   if (!text || sending.value) return;
@@ -592,19 +759,117 @@ async function send(): Promise<void> {
   }
 
   try {
-    const res = await api.post('/agent/chat', {
-      message: text,
-      context: {
-        model: model.value,
+    // 使用 fetch 读取 SSE 流（浏览器原生支持）
+    const token = getAuthToken() || '';
+    const apiBase = (api.defaults?.baseURL || '').replace(/\/+$/, '');
+    const fetchRes = await fetch(`${apiBase}/agent/chat`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(token ? { Authorization: `Bearer ${token}` } : {}),
       },
+      body: JSON.stringify({ message: text, context: { model: model.value } }),
     });
+    sending.value = false;
+    const contentType = fetchRes.headers.get('content-type') || '';
 
-    const reply = String(res.data?.reply || '').trim();
-    messages.value.push({ role: 'assistant', content: reply || '(empty reply)', ts: Date.now() });
+    if (contentType.includes('text/event-stream') && fetchRes.body) {
+      // SSE 流式响应：逐 token 显示（打字机效果）
+      const msgIdx = messages.value.length;
+      messages.value.push({ role: 'assistant', content: '', ts: Date.now(), streaming: true });
 
-    // 语音输入 + LLM 回复成功后自动保存录音记录至历史
-    if (isVoiceInput && reply) {
-      void stopRecordingAndSaveToServer(text, reply);
+      const reader = fetchRes.body.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      let fullReply = '';
+
+      /** 强制 Vue 检测到数组元素的变更 */
+      function updateAssistantContent(newContent: string): void {
+        const arr = [...messages.value];
+        arr[msgIdx] = { ...arr[msgIdx], content: newContent };
+        messages.value = arr;
+      }
+
+      /** 安全结束流式状态：清除 streaming 标记 */
+      function finalizeStream(): void {
+        if (messages.value[msgIdx]?.streaming) {
+          const arr = [...messages.value];
+          arr[msgIdx] = { ...arr[msgIdx], streaming: false };
+          messages.value = arr;
+        }
+      }
+
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+
+        // 解析 SSE 行
+        const lines = buffer.split('\n');
+        buffer = lines.pop() || ''; // 保留未完成的行
+
+        for (const line of lines) {
+          if (!line.startsWith('data: ')) continue;
+          try {
+            const payload = JSON.parse(line.slice(6));
+            if (payload.error) {
+              // 后端错误事件
+              const errMsg = payload.message || '请求出错';
+              updateAssistantContent(fullReply || '');
+              messages.value.push({ role: 'system', content: errMsg, ts: Date.now() });
+              break;
+            }
+            if (payload.toolExecuting) {
+              // 工具执行中（Node 正在调用后端工具）
+              const toolNames = Array.isArray(payload.tools) ? payload.tools.join(', ') : '';
+              messages.value.push({
+                role: 'system',
+                content: `⚙️ 正在执行工具：${toolNames || '...'}`,
+                ts: Date.now(),
+              });
+              scrollToBottom();
+              continue;
+            }
+            if (payload.token) {
+              fullReply += payload.token;
+              updateAssistantContent(fullReply);
+              scrollToBottom();
+            }
+            if (payload.done) {
+              fullReply = payload.reply || fullReply;
+              // 流结束，移除 streaming 标记
+              const arr = [...messages.value];
+              arr[msgIdx] = { ...arr[msgIdx], content: fullReply || 'AI 未能生成回复，请重试。', streaming: false };
+              messages.value = arr;
+            }
+          } catch { /* ignore parse errors */ }
+        }
+      }
+
+      // 确保最终状态正确（移除 streaming 标记）
+      finalizeStream();
+
+      const reply = fullReply.trim();
+
+      // 语音输入场景：自动播报 AI 回复
+      if (reply && isVoiceInput && tts.isSupported) {
+        tts.speak(reply, ttsConfig.value);
+      }
+      if (isVoiceInput && reply) {
+        void stopRecordingAndSaveToServer(text, reply);
+      }
+    } else {
+      // JSON 响应（兜底）
+      const data: any = await fetchRes.json();
+      const reply = String(data?.reply || '').trim();
+      messages.value.push({ role: 'assistant', content: reply || 'AI 未能生成回复，请重试。', ts: Date.now() });
+
+      if (reply && isVoiceInput && tts.isSupported) {
+        tts.speak(reply, ttsConfig.value);
+      }
+      if (isVoiceInput && reply) {
+        void stopRecordingAndSaveToServer(text, reply);
+      }
     }
   } catch (e: any) {
     const data = e?.response?.data;
@@ -637,6 +902,11 @@ async function send(): Promise<void> {
     messages.value.push({ role: 'system', content, ts: Date.now() });
   } finally {
     sending.value = false;
+    // 兜底：清除所有残留的 streaming 状态（防止流异常断开时蓝色光标不消失）
+    const hasStreaming = messages.value.some((m) => m.streaming);
+    if (hasStreaming) {
+      messages.value = messages.value.map((m) => ({ ...m, streaming: false }));
+    }
     scrollToBottom();
   }
 }
@@ -781,6 +1051,38 @@ watch(
   width: 100%;
 }
 
+.voice-config-divider {
+  height: 1px;
+  background: var(--el-border-color-lighter);
+  margin: 4px 0;
+}
+
+.voice-config-slider-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.voice-config-slider-label {
+  font-size: 11px;
+  color: var(--el-text-color-secondary);
+  white-space: nowrap;
+}
+
+.voice-config-slider {
+  flex: 1;
+}
+
+.voice-config-test-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.voice-config-test-input {
+  flex: 1;
+}
+
 .agent-float-body {
   flex: 1;
   padding: 12px;
@@ -835,6 +1137,98 @@ watch(
 .agent-msg.system .agent-msg-content {
   border-color: rgba(245, 108, 108, 0.25);
   background: rgba(245, 108, 108, 0.06);
+}
+
+/* ── 发送等待动画（跳动圆点） ─────────────────────────── */
+.sending-bubble {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 12px 16px !important;
+  min-width: 60px;
+}
+
+.dot-typing {
+  display: inline-block;
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--el-color-primary, #409eff);
+  animation: dot-bounce 1.2s ease-in-out infinite;
+}
+
+.dot-typing-2 {
+  animation-delay: 0.15s;
+}
+
+.dot-typing-3 {
+  animation-delay: 0.3s;
+}
+
+@keyframes dot-bounce {
+  0%, 60%, 100% {
+    transform: translateY(0);
+    opacity: 0.4;
+  }
+  30% {
+    transform: translateY(-6px);
+    opacity: 1;
+  }
+}
+
+/* ── 流式打字机光标 ──────────────────────────────────── */
+.streaming-cursor {
+  display: inline-block;
+  width: 6px;
+  height: 15px;
+  background: var(--el-color-primary, #409eff);
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  animation: blink-streaming-cursor 0.6s step-end infinite;
+}
+
+@keyframes blink-streaming-cursor {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0; }
+}
+
+.is-streaming {
+  border-color: var(--el-color-primary-light-5, rgba(64, 158, 255, 0.4)) !important;
+}
+
+/* ── 消息 TTS 播放按钮 ──────────────────────────────── */
+.msg-tts-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 24px;
+  height: 24px;
+  border: none;
+  border-radius: 50%;
+  background: transparent;
+  color: #a0aec0;
+  cursor: pointer;
+  padding: 0;
+  margin-top: 2px;
+  transition: all 0.15s ease;
+  font-family: inherit;
+}
+
+.msg-tts-btn:hover {
+  background: rgba(64, 158, 255, 0.1);
+  color: var(--el-color-primary, #409eff);
+}
+
+.msg-tts-btn.active {
+  color: var(--el-color-primary, #409eff);
+  background: rgba(64, 158, 255, 0.12);
+  animation: pulse-ring 1.2s ease-in-out infinite;
+}
+
+@keyframes pulse-ring {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(64, 158, 255, 0.3); }
+  50% { box-shadow: 0 0 0 4px rgba(64, 158, 255, 0); }
 }
 
 /* ── 中间结果气泡样式 ──────────────────────────────── */

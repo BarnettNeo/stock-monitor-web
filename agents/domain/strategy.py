@@ -242,13 +242,101 @@ def build_create_strategy_questions(missing: List[str]) -> str:
     return "\n".join(qs[:2])
 
 
+def heuristic_extract_create_strategy_args(user_message: str) -> Dict[str, Any]:
+    """用正则/关键词提取创建策略参数（替代 LLM 调用，节省 2-5 秒）"""
+    import re
+    text = (user_message or "").strip()
+    if not text:
+        return {}
+
+    args: Dict[str, Any] = {}
+
+    # 1. symbols
+    symbols = extract_symbols_from_text(text)
+    if symbols:
+        args["symbols"] = symbols
+
+    # 2. priceAlertPercent
+    pct_match = re.search(r'(?:阈值|涨跌[幅口]?|跌幅|涨幅|百分之)\s*(\d+(?:\.\d+)?)\s*%?', text)
+    if not pct_match:
+        pct_match = re.search(r'(\d+(?:\.\d+)?)\s*%\s*(?:提醒|通知|报警|告警)', text)
+    if pct_match:
+        args["priceAlertPercent"] = float(pct_match.group(1))
+        args.setdefault("alertMode", "percent")
+
+    # 3. targetPriceUp/Down
+    target_up = re.search(r'(?:涨到|突破|超过|高于|目标价)\s*(\d+(?:\.\d+)?)', text)
+    if target_up:
+        args["targetPriceUp"] = float(target_up.group(1))
+        args.setdefault("alertMode", "target")
+
+    target_down = re.search(r'(?:跌破|低于|跌到)\s*(\d+(?:\.\d+)?)', text)
+    if target_down:
+        args["targetPriceDown"] = float(target_down.group(1))
+        args.setdefault("alertMode", "target")
+
+    # 4. alertMode
+    if "目标价" in text or "区间" in text:
+        args.setdefault("alertMode", "target")
+    elif "百分比" in text or "阈值" in text:
+        args.setdefault("alertMode", "percent")
+
+    # 5. enabled
+    if re.search(r'启用|打开|开启|激活', text):
+        args["enabled"] = True
+    elif re.search(r'停用|关闭|禁用|暂停', text):
+        args["enabled"] = False
+
+    # 6. intervalMinutes
+    interval_match = re.search(r'(?:间隔|每隔|每)\s*(\d+)\s*(?:分钟|min)', text, re.IGNORECASE)
+    if interval_match:
+        args["intervalMinutes"] = int(interval_match.group(1))
+
+    # 7. cooldownMinutes
+    cooldown_match = re.search(r'冷却\s*(\d+)\s*(?:分钟|min)', text, re.IGNORECASE)
+    if cooldown_match:
+        args["cooldownMinutes"] = int(cooldown_match.group(1))
+
+    # 8. 技术指标
+    if re.search(r'MACD|金叉', text, re.IGNORECASE):
+        args["enableMacdGoldenCross"] = True
+    if re.search(r'RSI\s*(?:超卖|低于|<)', text, re.IGNORECASE):
+        args["enableRsiOversold"] = True
+    if re.search(r'RSI\s*(?:超买|高于|>)', text, re.IGNORECASE):
+        args["enableRsiOverbought"] = True
+    if re.search(r'均线|MA|移动平均', text, re.IGNORECASE):
+        args["enableMovingAverages"] = True
+    if re.search(r'形态|K线形态|信号', text, re.IGNORECASE):
+        args["enablePatternSignal"] = True
+
+    return args
+
+
 async def llm_extract_create_strategy_args(
     user_message: str,
     current_args: Dict[str, Any],
     model_override: Optional[str],
 ) -> Dict[str, Any]:
-    """使用LLM提取创建策略参数"""
-    # 用 LLM 做字段抽取（JSON）
+    """使用LLM提取创建策略参数（启发式优先 → 缓存 → LLM）"""
+    # 1. 优先用启发式提取（0ms）
+    heuristic = heuristic_extract_create_strategy_args(user_message)
+    has_sufficient = any(heuristic.get(k) for k in [
+        "symbols", "priceAlertPercent", "targetPriceUp", "targetPriceDown",
+        "alertMode", "intervalMinutes", "cooldownMinutes",
+        "enableMacdGoldenCross", "enableRsiOversold", "enableRsiOverbought",
+        "enableMovingAverages", "enablePatternSignal",
+    ])
+    if has_sufficient:
+        return heuristic
+
+    # 2. 检查缓存
+    from infrastructure.cache import intent_cache
+    cache_key = f"create_strategy:{user_message}"
+    cached = intent_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
+    # 3. 启发式不足，回退 LLM（使用轻量子模型，2-3s）
     prompt = {
         "instruction": "从用户自然语言中抽取创建股票监控策略所需参数。只输出 JSON。",
         "output": {
@@ -286,14 +374,20 @@ async def llm_extract_create_strategy_args(
         {"role": "user", "content": json.dumps(prompt, ensure_ascii=False)},
     ]
 
-    llm = await call_openai_compatible(messages, model_override=model_override, json_mode=True)
+    # 使用轻量子模型做参数抽取（qwen-turbo ~1.6s，比用户模型快 5x）
+    from core.config import _llm_config_sub
+    sub_cfg = _llm_config_sub()
+    llm = await call_openai_compatible(messages, model_override=sub_cfg.get("model"), json_mode=True, max_tokens=512)
     if not llm.get("ok"):
         return {}
 
     from llm.llm import extract_json_object
     obj = extract_json_object(str(llm.get("reply") or "")) or {}
     args = obj.get("args") if isinstance(obj, dict) else None
-    return args if isinstance(args, dict) else {}
+    result = args if isinstance(args, dict) else {}
+    if result:
+        intent_cache.set(cache_key, result)
+    return result
 
 
 
